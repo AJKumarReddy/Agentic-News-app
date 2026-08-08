@@ -1,0 +1,51 @@
+# ── Secrets — never commit ─────────────────────────────
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+id_rsa*
+*.ppk
+aws-credentials*
+secrets/
+
+# ── Python ─────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+wheels/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+coverage.xml
+
+# ── Node / frontend ────────────────────────────────────
+node_modules/
+frontend/dist/
+frontend/.vite/
+npm-debug.log*
+yarn-error.log*
+
+# ── Docker / runtime data ──────────────────────────────
+postgres-data/
+redis-data/
+qdrant-data/
+*.log
+logs/
+
+# ── IDE / OS ───────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# ── Misc ───────────────────────────────────────────────
+.cache/
+tmp/

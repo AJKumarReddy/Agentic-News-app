@@ -1,0 +1,79 @@
+import logging
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+
+from app.api import chat, health, news, rag
+from app.core.config import get_settings
+from app.core.logging import Timer, configure_logging, log_event, new_request_id
+from app.core.security import RateLimitMiddleware, SecurityHeadersMiddleware
+from app.database.session import engine, init_db
+from app.guardian.client import get_guardian_client
+
+logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    settings = get_settings()
+    configure_logging(settings.log_level)
+    await init_db()
+    logger.info("Guardian AI News Assistant backend started (%s)", settings.environment)
+    yield
+    await get_guardian_client().aclose()
+    await engine.dispose()
+
+
+def create_app() -> FastAPI:
+    settings = get_settings()
+    app = FastAPI(
+        title="Guardian AI News Assistant",
+        version="1.0.0",
+        lifespan=lifespan,
+        docs_url=None if settings.is_production else "/docs",
+        redoc_url=None,
+        openapi_url=None if settings.is_production else "/openapi.json",
+    )
+
+    # CORS: explicit origins only — never "*" in production
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_origins,
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_headers=["Content-Type", "Authorization"],
+    )
+    app.add_middleware(SecurityHeadersMiddleware)
+    app.add_middleware(RateLimitMiddleware, limit_per_minute=settings.rate_limit_per_minute)
+
+    @app.middleware("http")
+    async def request_logging(request: Request, call_next):
+        request_id = new_request_id()
+        with Timer() as timer:
+            response = await call_next(request)
+        response.headers["X-Request-ID"] = request_id
+        log_event(
+            logger,
+            "http_request",
+            method=request.method,
+            path=request.url.path,
+            status=response.status_code,
+            total_latency=timer.ms,
+        )
+        return response
+
+    @app.exception_handler(Exception)
+    async def unhandled_exception_handler(request: Request, exc: Exception):
+        logger.exception("Unhandled error on %s", request.url.path)
+        return JSONResponse(status_code=500, content={"detail": "Internal server error"})
+
+    app.include_router(health.router, prefix="/api")
+    app.include_router(chat.router, prefix="/api")
+    app.include_router(news.router, prefix="/api")
+    app.include_router(rag.router, prefix="/api")
+    return app
+
+
+app = create_app()

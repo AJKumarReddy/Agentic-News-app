@@ -1,0 +1,22 @@
+[
+  {"id": 1,  "category": "freshness",       "question": "What are the latest AI stories reported by The Guardian?", "expect_citations": true, "expected_intent": ["LATEST_NEWS", "TOPIC_SUMMARY"]},
+  {"id": 2,  "category": "freshness",       "question": "What is breaking in UK politics today?", "expect_citations": true, "expected_intent": ["LATEST_NEWS"]},
+  {"id": 3,  "category": "freshness",       "question": "What did The Guardian publish about climate change this week?", "expect_citations": true, "expected_intent": ["LATEST_NEWS", "TOPIC_SUMMARY", "ENTITY_RESEARCH"]},
+  {"id": 4,  "category": "entity_research", "question": "What has The Guardian reported about OpenAI this month?", "expect_citations": true, "expected_intent": ["ENTITY_RESEARCH", "LATEST_NEWS"]},
+  {"id": 5,  "category": "entity_research", "question": "What has The Guardian written about the European Central Bank recently?", "expect_citations": true, "expected_intent": ["ENTITY_RESEARCH", "LATEST_NEWS"]},
+  {"id": 6,  "category": "entity_research", "question": "Summarize Guardian reporting on Elon Musk over the past month.", "expect_citations": true, "expected_intent": ["ENTITY_RESEARCH", "TOPIC_SUMMARY"]},
+  {"id": 7,  "category": "comparison",      "question": "Compare Guardian coverage of OpenAI and Anthropic.", "expect_citations": true, "expected_intent": ["COMPARISON"]},
+  {"id": 8,  "category": "comparison",      "question": "Compare what The Guardian reported about Labour and the Conservatives this month.", "expect_citations": true, "expected_intent": ["COMPARISON"]},
+  {"id": 9,  "category": "timeline",        "question": "Create a timeline of recent developments involving NVIDIA.", "expect_citations": true, "expected_intent": ["TIMELINE"]},
+  {"id": 10, "category": "timeline",        "question": "Give me a chronological timeline of Guardian reporting on the war in Ukraine over the last two weeks.", "expect_citations": true, "expected_intent": ["TIMELINE"]},
+  {"id": 11, "category": "section_filter",  "question": "What AI stories appeared in The Guardian technology section this week?", "expect_citations": true, "expected_intent": ["LATEST_NEWS", "ARTICLE_SEARCH", "TOPIC_SUMMARY"]},
+  {"id": 12, "category": "section_filter",  "question": "What did the Guardian environment section cover yesterday?", "expect_citations": true, "expected_intent": ["LATEST_NEWS", "ARTICLE_SEARCH"]},
+  {"id": 13, "category": "topic_summary",   "question": "Summarize The Guardian's recent coverage of interest rates.", "expect_citations": true, "expected_intent": ["TOPIC_SUMMARY", "ENTITY_RESEARCH"]},
+  {"id": 14, "category": "fact_lookup",     "question": "According to Guardian reporting, who is the current UK chancellor?", "expect_citations": true, "expected_intent": ["FACT_LOOKUP", "ENTITY_RESEARCH"]},
+  {"id": 15, "category": "trend_analysis",  "question": "How has Guardian coverage of electric vehicles changed over the past three months?", "expect_citations": true, "expected_intent": ["TREND_ANALYSIS", "TOPIC_SUMMARY"]},
+  {"id": 16, "category": "follow_up",       "question": "What has The Guardian reported about Tesla recently?", "expect_citations": true, "expected_intent": ["ENTITY_RESEARCH", "LATEST_NEWS"], "follow_up": "What about its competitors?"},
+  {"id": 17, "category": "follow_up",       "question": "What did The Guardian report about NVIDIA this month?", "expect_citations": true, "expected_intent": ["ENTITY_RESEARCH", "LATEST_NEWS"], "follow_up": "What about AMD?"},
+  {"id": 18, "category": "unsupported",     "question": "What did The Guardian report about the secret 2031 Mars colony election results?", "expect_citations": false, "expect_insufficient": true},
+  {"id": 19, "category": "unsupported",     "question": "Quote The Guardian's interview with William Shakespeare from last Tuesday.", "expect_citations": false, "expect_insufficient": true},
+  {"id": 20, "category": "source_lookup",   "question": "What has The Guardian reported about Apple this week?", "expect_citations": true, "expected_intent": ["ENTITY_RESEARCH", "LATEST_NEWS"], "follow_up": "Which article supports the first point you made?"}
+]

@@ -1,0 +1,54 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  @apply bg-slate-50 text-slate-900 antialiased;
+}
+
+/* markdown body inside chat bubbles */
+.prose-chat h1,
+.prose-chat h2,
+.prose-chat h3 {
+  @apply font-semibold mt-4 mb-2;
+}
+.prose-chat h2 {
+  @apply text-lg;
+}
+.prose-chat h3 {
+  @apply text-base;
+}
+.prose-chat p {
+  @apply my-2 leading-relaxed;
+}
+.prose-chat ul {
+  @apply list-disc pl-5 my-2 space-y-1;
+}
+.prose-chat ol {
+  @apply list-decimal pl-5 my-2 space-y-1;
+}
+.prose-chat table {
+  @apply my-3 w-full text-sm border-collapse;
+}
+.prose-chat th,
+.prose-chat td {
+  @apply border border-slate-200 px-2 py-1 text-left;
+}
+.prose-chat a {
+  @apply text-guardian-600 underline;
+}
+.prose-chat strong {
+  @apply font-semibold;
+}
+.prose-chat code {
+  @apply bg-slate-100 rounded px-1 text-sm;
+}
+.citation-badge {
+  @apply inline-flex items-center justify-center text-[11px] font-semibold text-guardian-700 bg-guardian-100 rounded px-1 mx-0.5 align-super cursor-pointer hover:bg-guardian-500 hover:text-white transition-colors;
+}
