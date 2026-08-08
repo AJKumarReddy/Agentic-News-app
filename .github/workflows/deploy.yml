@@ -1,0 +1,42 @@
+name: Deploy to AWS EC2
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  test:
+    name: Run test suite first
+    uses: ./.github/workflows/test.yml
+
+  deploy:
+    name: Deploy over SSH
+    runs-on: ubuntu-latest
+    needs: test
+    environment: production
+    steps:
+      - name: Deploy on EC2 via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script_stop: true
+          command_timeout: 20m
+          script: |
+            cd ${{ secrets.EC2_APP_DIR || '~/guardian-ai-news-assistant' }}
+            git fetch origin main
+            git reset --hard origin/main
+            docker compose --profile prod up -d --build
+            docker image prune -f
+            bash scripts/health-check.sh http://localhost:8000 12 5
+
+      - name: Verify public health endpoint
+        if: ${{ vars.PUBLIC_API_URL != '' }}
+        run: |
+          curl --fail --silent --max-time 20 "${{ vars.PUBLIC_API_URL }}/api/health"
