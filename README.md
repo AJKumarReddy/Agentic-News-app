@@ -270,6 +270,15 @@ Point `@` and `www` A records at the EC2 Elastic IP, issue certs for those names
 - [ ] Restrict SSH to your IP; consider SSM Session Manager instead of SSH
 - [ ] Enable EC2 EBS snapshots / `pg_dump` backups
 
+## Alternative deployment: CodePipeline → ECR → ECS Fargate
+
+An AWS-native pipeline (GitHub → CodePipeline → CodeBuild → ECR → ECS Fargate, with RDS PostgreSQL + ElastiCache Redis behind an ALB) is fully documented in **[aws/ECS_PIPELINE.md](aws/ECS_PIPELINE.md)**. The repo ships ready for it:
+
+- [`buildspec.yml`](buildspec.yml) — CodeBuild builds/pushes both images and emits per-service image definitions
+- [`aws/taskdef-backend.json`](aws/taskdef-backend.json) / [`aws/taskdef-frontend.json`](aws/taskdef-frontend.json) — Fargate task definitions with SSM-injected secrets and health checks
+
+Choose it over the EC2 path when you want managed rolling deploys and autoscaling instead of the cheapest possible single server.
+
 ## Growing beyond one EC2 instance
 
 | Concern | Upgrade path |
