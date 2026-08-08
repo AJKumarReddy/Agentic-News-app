@@ -1,0 +1,52 @@
+{
+  "family": "guardian-backend",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "512",
+  "memory": "1024",
+  "executionRoleArn": "arn:aws:iam::<ACCOUNT_ID>:role/guardianEcsExecutionRole",
+  "taskRoleArn": "arn:aws:iam::<ACCOUNT_ID>:role/guardianEcsTaskRole",
+  "runtimePlatform": { "cpuArchitecture": "X86_64", "operatingSystemFamily": "LINUX" },
+  "containerDefinitions": [
+    {
+      "name": "backend",
+      "image": "<ACCOUNT_ID>.dkr.ecr.<REGION>.amazonaws.com/guardian-backend:latest",
+      "essential": true,
+      "portMappings": [{ "containerPort": 8000, "protocol": "tcp" }],
+      "environment": [
+        { "name": "ENVIRONMENT", "value": "production" },
+        { "name": "LOG_LEVEL", "value": "INFO" },
+        { "name": "CHAT_MODEL", "value": "gpt-4o" },
+        { "name": "EMBEDDING_MODEL", "value": "text-embedding-3-small" },
+        { "name": "EMBEDDING_DIMENSIONS", "value": "1536" },
+        { "name": "FRONTEND_URL", "value": "https://mydomain.com" },
+        { "name": "RAG_INITIAL_TOP_K", "value": "20" },
+        { "name": "RAG_FINAL_TOP_K", "value": "6" },
+        { "name": "RERANKER", "value": "llm" },
+        { "name": "MAX_AGENT_ITERATIONS", "value": "6" },
+        { "name": "RATE_LIMIT_PER_MINUTE", "value": "30" }
+      ],
+      "secrets": [
+        { "name": "GUARDIAN_API_KEY", "valueFrom": "arn:aws:ssm:<REGION>:<ACCOUNT_ID>:parameter/guardian-app/GUARDIAN_API_KEY" },
+        { "name": "OPENAI_API_KEY",   "valueFrom": "arn:aws:ssm:<REGION>:<ACCOUNT_ID>:parameter/guardian-app/OPENAI_API_KEY" },
+        { "name": "DATABASE_URL",     "valueFrom": "arn:aws:ssm:<REGION>:<ACCOUNT_ID>:parameter/guardian-app/DATABASE_URL" },
+        { "name": "REDIS_URL",        "valueFrom": "arn:aws:ssm:<REGION>:<ACCOUNT_ID>:parameter/guardian-app/REDIS_URL" }
+      ],
+      "healthCheck": {
+        "command": ["CMD-SHELL", "curl -sf http://localhost:8000/api/health || exit 1"],
+        "interval": 30,
+        "timeout": 10,
+        "retries": 3,
+        "startPeriod": 30
+      },
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/guardian-backend",
+          "awslogs-region": "<REGION>",
+          "awslogs-stream-prefix": "backend"
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,50 @@
+# AWS CodeBuild spec — builds both Docker images, pushes them to Amazon ECR,
+# and emits image definition files consumed by the CodePipeline ECS deploy
+# actions (one per service).
+#
+# CodeBuild project requirements:
+#   - Environment: Amazon Linux, standard image, PRIVILEGED MODE ON (Docker)
+#   - Service role permissions: ecr:GetAuthorizationToken, ecr:BatchCheckLayerAvailability,
+#     ecr:PutImage, ecr:InitiateLayerUpload, ecr:UploadLayerPart, ecr:CompleteLayerUpload,
+#     sts:GetCallerIdentity
+#   - Env var overrides (optional): ECR_REPO_BACKEND, ECR_REPO_FRONTEND, VITE_API_BASE_URL
+
+version: 0.2
+
+env:
+  variables:
+    ECR_REPO_BACKEND: guardian-backend
+    ECR_REPO_FRONTEND: guardian-frontend
+    # /api works when frontend and backend share one ALB domain.
+    # Override with https://api.mydomain.com/api for a split-domain setup.
+    VITE_API_BASE_URL: /api
+
+phases:
+  pre_build:
+    commands:
+      - AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+      - ECR_URI=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
+      - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $ECR_URI
+      - IMAGE_TAG=$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | cut -c1-7)
+      - echo "Building tag $IMAGE_TAG for $ECR_URI"
+
+  build:
+    commands:
+      - docker build -t $ECR_URI/$ECR_REPO_BACKEND:$IMAGE_TAG -t $ECR_URI/$ECR_REPO_BACKEND:latest ./backend
+      - docker build --build-arg VITE_API_BASE_URL=$VITE_API_BASE_URL -t $ECR_URI/$ECR_REPO_FRONTEND:$IMAGE_TAG -t $ECR_URI/$ECR_REPO_FRONTEND:latest ./frontend
+
+  post_build:
+    commands:
+      - docker push $ECR_URI/$ECR_REPO_BACKEND:$IMAGE_TAG
+      - docker push $ECR_URI/$ECR_REPO_BACKEND:latest
+      - docker push $ECR_URI/$ECR_REPO_FRONTEND:$IMAGE_TAG
+      - docker push $ECR_URI/$ECR_REPO_FRONTEND:latest
+      # Container names must match the names inside the ECS task definitions
+      - printf '[{"name":"backend","imageUri":"%s"}]'  "$ECR_URI/$ECR_REPO_BACKEND:$IMAGE_TAG"  > imagedefinitions-backend.json
+      - printf '[{"name":"frontend","imageUri":"%s"}]' "$ECR_URI/$ECR_REPO_FRONTEND:$IMAGE_TAG" > imagedefinitions-frontend.json
+      - cat imagedefinitions-backend.json imagedefinitions-frontend.json
+
+artifacts:
+  files:
+    - imagedefinitions-backend.json
+    - imagedefinitions-frontend.json
