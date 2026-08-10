@@ -1,9 +1,11 @@
+from datetime import datetime
+
 import httpx
 import pytest
 
 import app.sources.nyt as nyt_module
 from app.guardian.models import NormalizedArticle
-from app.services.search_service import interleave
+from app.services.search_service import merge
 from app.sources.guardian_source import GuardianSource
 from app.sources.nyt import NYTSource
 
@@ -182,33 +184,60 @@ def test_sources_claim_their_own_article_ids():
 
 # ── merge behaviour ───────────────────────────────────────────────
 
-def article(article_id: str, source_id: str) -> NormalizedArticle:
+def article(article_id: str, source_id: str, published: str | None = None) -> NormalizedArticle:
     return NormalizedArticle(
         article_id=article_id,
         headline=article_id,
         url=f"https://example.com/{article_id}",
         source_id=source_id,
+        published_at=datetime.fromisoformat(published) if published else None,
     )
 
 
-def test_interleave_alternates_between_sources():
-    guardian = [article("g1", "guardian"), article("g2", "guardian"), article("g3", "guardian")]
-    nyt = [article("n1", "nyt"), article("n2", "nyt")]
-    merged = [a.article_id for a in interleave([guardian, nyt])]
-    # neither publisher is allowed to dominate the top of the list
-    assert merged == ["g1", "n1", "g2", "n2", "g3"]
+def test_merge_orders_by_freshness_across_publishers():
+    guardian = [article("g1", "guardian", "2026-08-10T09:00:00+00:00")]
+    nyt = [
+        article("n1", "nyt", "2026-08-10T11:00:00+00:00"),
+        article("n2", "nyt", "2026-08-10T10:00:00+00:00"),
+    ]
+    merged = [a.article_id for a in merge([guardian, nyt])]
+    # the freshest wins outright; one publisher may legitimately take the top
+    assert merged == ["n1", "n2", "g1"]
 
 
-def test_interleave_deduplicates_by_url():
-    same = article("dupe", "guardian")
-    merged = interleave([[same], [same]])
-    assert len(merged) == 1
+def test_merge_compares_across_offset_and_utc():
+    # publishers differ on whether they send an offset; mixing naive with
+    # aware datetimes raises TypeError on comparison
+    guardian = [article("g1", "guardian", "2026-08-10T09:00:00")]
+    nyt = [article("n1", "nyt", "2026-08-10T08:00:00+00:00")]
+    assert [a.article_id for a in merge([guardian, nyt])] == ["g1", "n1"]
 
 
-def test_interleave_handles_an_empty_source():
-    guardian = [article("g1", "guardian")]
-    merged = [a.article_id for a in interleave([guardian, []])]
-    assert merged == ["g1"]
+def test_merge_oldest_reverses_and_keeps_undated_last():
+    dated = [article("g1", "guardian", "2026-08-10T09:00:00+00:00")]
+    older = [article("n1", "nyt", "2026-08-09T09:00:00+00:00")]
+    undated = [article("x1", "nyt")]
+    merged = [a.article_id for a in merge([dated, older, undated], "oldest")]
+    # an absent date must never outrank a real one, in either direction
+    assert merged == ["n1", "g1", "x1"]
+
+
+def test_merge_relevance_round_robins():
+    guardian = [article("g1", "guardian"), article("g2", "guardian")]
+    nyt = [article("n1", "nyt")]
+    # relevance scores aren't comparable across publishers, so preserve
+    # each source's own ranking rather than inventing a cross-source order
+    assert [a.article_id for a in merge([guardian, nyt], "relevance")] == ["g1", "n1", "g2"]
+
+
+def test_merge_deduplicates_by_url():
+    same = article("dupe", "guardian", "2026-08-10T09:00:00+00:00")
+    assert len(merge([[same], [same]])) == 1
+
+
+def test_merge_handles_an_empty_source():
+    guardian = [article("g1", "guardian", "2026-08-10T09:00:00+00:00")]
+    assert [a.article_id for a in merge([guardian, []])] == ["g1"]
 
 
 # ── source diversity in retrieval ─────────────────────────────────
