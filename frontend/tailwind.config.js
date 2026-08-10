@@ -63,7 +63,7 @@ export default {
       },
       backgroundImage: {
         'brand-gradient': 'linear-gradient(135deg, #5f3fd8 0%, #7355ee 45%, #18aca1 100%)',
-        'brand-soft': 'linear-gradient(135deg, #f3f2ff 0%, #eefdfa 100%)',
+        'brand-soft': 'linear-gradient(180deg, #fbfbfd 0%, #f6f7fa 100%)',
         'sidebar-gradient': 'linear-gradient(175deg, #281a5c 0%, #180f38 55%, #134949 100%)',
         'brand-soft-dark': 'linear-gradient(135deg, #14121f 0%, #101a1e 100%)',
       },
@@ -73,7 +73,7 @@ export default {
       },
       boxShadow: {
         card: '0 1px 2px rgba(21, 24, 39, 0.04), 0 4px 16px rgba(21, 24, 39, 0.06)',
-        lift: '0 2px 4px rgba(21, 24, 39, 0.06), 0 12px 32px rgba(95, 63, 216, 0.14)',
+        lift: '0 2px 4px rgba(21, 24, 39, 0.06), 0 10px 24px rgba(21, 24, 39, 0.10)',
         glow: '0 8px 28px rgba(95, 63, 216, 0.28)',
       },
       keyframes: {

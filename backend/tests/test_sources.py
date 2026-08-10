@@ -301,3 +301,46 @@ async def test_a_failing_source_does_not_break_pagination(monkeypatch):
     result = await search_service.search_news(query="x")
     assert result.pages == 3 and result.total == 30
     assert [a.source_id for a in result.articles] == ["guardian"]
+
+
+async def test_top_stories_pages_through_the_feed():
+    """Top Stories has no server-side paging; slicing its head every time
+    served the same articles on every page."""
+    feed = {
+        "results": [
+            {
+                "uri": f"nyt://article/f{i}",
+                "url": f"https://www.nytimes.com/{i}",
+                "title": f"Story {i}",
+                "abstract": "abstract",
+                "published_date": "2026-08-10T09:00:00-04:00",
+                "section": "technology",
+                "byline": "By Someone",
+            }
+            for i in range(10)
+        ]
+    }
+    source = make_nyt(lambda r: httpx.Response(200, json=feed))
+
+    page1 = await source.search("", section="technology", page=1, page_size=4)
+    page2 = await source.search("", section="technology", page=2, page_size=4)
+    page3 = await source.search("", section="technology", page=3, page_size=4)
+
+    assert [a.article_id for a in page1] == [f"nyt://article/f{i}" for i in range(4)]
+    assert [a.article_id for a in page2] == [f"nyt://article/f{i}" for i in range(4, 8)]
+    assert not set(a.article_id for a in page1) & set(a.article_id for a in page2)
+    assert len(page3) == 2  # feed exhausted, not repeated
+
+
+async def test_top_stories_reports_finite_pages():
+    feed = {
+        "results": [
+            {"uri": f"nyt://article/g{i}", "url": f"https://nyt.com/{i}", "title": f"T{i}", "abstract": "a"}
+            for i in range(10)
+        ]
+    }
+    source = make_nyt(lambda r: httpx.Response(200, json=feed))
+    result = await source.search_page("", section="technology", page=1, page_size=4)
+    # 10 articles / 4 per page = 3 pages, so Next stops instead of running forever
+    assert result.pages == 3
+    assert result.total == 10

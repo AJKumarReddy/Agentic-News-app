@@ -10,7 +10,7 @@ function MessageBubble({ message }: { message: ChatMessage }) {
   if (message.role === 'user') {
     return (
       <div className="flex animate-fade-up justify-end">
-        <div className="max-w-[80%] rounded-2xl rounded-br-md bg-brand-gradient px-4 py-2.5 shadow-glow text-[15px] leading-relaxed text-white shadow-sm">
+        <div className="max-w-[80%] rounded-2xl rounded-br-md bg-brand-600 px-4 py-2.5 text-[15px] leading-relaxed text-white">
           {message.content}
         </div>
       </div>

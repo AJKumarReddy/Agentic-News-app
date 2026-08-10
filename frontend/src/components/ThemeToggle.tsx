@@ -36,7 +36,7 @@ export default function ThemeToggle({
     <div
       role="radiogroup"
       aria-label="Colour theme"
-      className="flex gap-1 rounded-lg bg-white/5 p-1"
+      className="flex gap-1 rounded-md bg-white/[0.05] p-0.5"
     >
       {OPTIONS.map((option) => {
         const active = theme === option.value;
@@ -46,10 +46,10 @@ export default function ThemeToggle({
             role="radio"
             aria-checked={active}
             onClick={() => onSelect(option.value)}
-            className={`flex flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-[12px] font-medium transition-colors ${
+            className={`flex flex-1 items-center justify-center gap-1.5 rounded px-2 py-1.5 text-[12px] font-medium transition-colors ${
               active
-                ? 'bg-white/15 text-white shadow-sm'
-                : 'text-white/50 hover:bg-white/5 hover:text-white/80'
+                ? 'bg-white/[0.12] text-white'
+                : 'text-white/45 hover:bg-white/[0.05] hover:text-white/75'
             }`}
           >
             {option.icon}

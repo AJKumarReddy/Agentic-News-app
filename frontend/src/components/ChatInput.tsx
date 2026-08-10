@@ -62,7 +62,7 @@ export default function ChatInput({
           type="submit"
           disabled={busy || !text.trim()}
           aria-label="Send message"
-          className="shrink-0 rounded-xl bg-brand-gradient px-4 py-2.5 text-sm font-semibold text-white shadow-glow transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:bg-ink-300 disabled:bg-none disabled:shadow-none"
+          className="shrink-0 rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-brand-700 disabled:cursor-not-allowed disabled:bg-ink-300"
         >
           Send
         </button>

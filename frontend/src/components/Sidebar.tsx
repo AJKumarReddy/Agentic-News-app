@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, NavLink, useNavigate, useSearchParams } from 'react-router-dom';
 import { SECTIONS, SECTION_GROUPS } from '../constants/sections';
+import Logo from './Logo';
 import ThemeToggle from './ThemeToggle';
 import type { Theme } from '../hooks/useTheme';
 import { deleteAllConversations, deleteConversation, listConversations, listSources } from '../services/api';
@@ -63,31 +64,25 @@ export default function Sidebar({
 
   const navClass = ({ isActive }: { isActive: boolean }) =>
     `flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
-      isActive ? 'bg-white/10 text-white' : 'text-accent-200/80 hover:bg-white/5 hover:text-white'
+      isActive ? 'bg-white/[0.08] text-white' : 'text-white/65 hover:bg-white/[0.04] hover:text-white'
     }`;
 
   return (
-    <aside className="hidden w-[264px] shrink-0 flex-col bg-sidebar-gradient text-white md:flex">
+    <aside className="hidden w-[264px] shrink-0 flex-col border-r border-ink-800 bg-ink-900 text-white md:flex">
       {/* the logo returns to the landing screen; without fresh state the
           route is already "/" and the open conversation would stay mounted */}
       <Link
         to="/"
         state={{ newChat: Date.now() }}
-        className="flex items-center gap-2.5 border-b border-white/10 px-5 py-4 transition-colors hover:bg-white/5"
+        className="border-b border-white/10 px-5 py-4 transition-colors hover:bg-white/[0.04]"
       >
-        <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-gradient text-[15px] font-bold shadow-glow">
-          N
-        </span>
-        <span>
-          <span className="block text-[15px] font-semibold leading-tight">News AI</span>
-          <span className="block text-[11px] text-accent-200/50">Research assistant</span>
-        </span>
+        <Logo />
       </Link>
 
       <div className="space-y-1 p-3">
         <button
           onClick={() => navigate('/', { state: { newChat: Date.now() } })}
-          className="flex w-full items-center gap-2 rounded-lg bg-brand-gradient px-3 py-2 text-sm font-semibold shadow-glow transition-opacity hover:opacity-90"
+          className="flex w-full items-center gap-2 rounded-md bg-brand-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-500"
         >
           <span className="text-base leading-none">+</span> New chat
         </button>
@@ -99,7 +94,7 @@ export default function Sidebar({
       <div className="mt-1 flex-1 overflow-y-auto px-3">
         {SECTION_GROUPS.map((group) => (
           <div key={group} className="pb-2">
-            <div className="px-3 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wider text-white/35">
+            <div className="px-3 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-white/30">
               {group}
             </div>
             <div className="grid grid-cols-2 gap-x-1 gap-y-0.5">
@@ -107,7 +102,7 @@ export default function Sidebar({
                 <Link
                   key={section.id}
                   to={`/search?section=${section.id}`}
-                  className="truncate rounded-lg px-2.5 py-1.5 text-[12.5px] text-white/70 transition-colors hover:bg-white/5 hover:text-white"
+                  className="truncate rounded-md px-2.5 py-1.5 text-[12.5px] text-white/60 transition-colors hover:bg-white/[0.05] hover:text-white"
                 >
                   {section.label}
                 </Link>
@@ -117,13 +112,13 @@ export default function Sidebar({
         ))}
 
         <div className="flex items-center justify-between px-3 pb-1.5">
-          <span className="text-[10px] font-semibold uppercase tracking-wider text-white/35">
+          <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-white/30">
             Recent chats
           </span>
           {conversations.length > 0 && (
             <button
               onClick={removeAll}
-              className="text-[10px] font-medium text-white/35 transition-colors hover:text-red-300"
+              className="text-[10px] font-medium text-white/30 transition-colors hover:text-red-300"
               title="Delete all chats"
             >
               Clear all
@@ -132,18 +127,18 @@ export default function Sidebar({
         </div>
         <div className="space-y-0.5 pb-4">
           {conversations.length === 0 && (
-            <div className="px-3 py-2 text-xs text-white/30">No conversations yet</div>
+            <div className="px-3 py-2 text-xs text-white/25">No conversations yet</div>
           )}
           {conversations.map((conversation) => (
             <div
               key={conversation.id}
-              className={`group flex items-center rounded-lg transition-colors ${
-                openConversationId === conversation.id ? 'bg-white/10' : 'hover:bg-white/5'
+              className={`group flex items-center rounded-md transition-colors ${
+                openConversationId === conversation.id ? 'bg-white/[0.08]' : 'hover:bg-white/[0.04]'
               }`}
             >
               <Link
                 to={`/?conversation=${conversation.id}`}
-                className="min-w-0 flex-1 truncate px-3 py-2 text-[13px] text-white/80"
+                className="min-w-0 flex-1 truncate px-3 py-2 text-[13px] text-white/75"
                 title={conversation.title}
               >
                 {conversation.title}
@@ -168,7 +163,7 @@ export default function Sidebar({
         <ThemeToggle theme={theme} onSelect={onSelectTheme} />
       </div>
 
-      <div className="border-t border-white/10 px-5 py-3 text-[10px] leading-relaxed text-white/35">
+      <div className="border-t border-white/10 px-5 py-3 text-[10px] leading-relaxed text-white/30">
         {sources.length > 0 ? (
           <>Sourced from {sources.map((s) => s.name).join(' · ')}</>
         ) : (
