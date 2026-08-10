@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import ArticleCard from '../components/ArticleCard';
 import { getArticleIntelligence } from '../services/api';
-import type { ArticleIntelligence } from '../types';
+import type { Article, ArticleIntelligence } from '../types';
 import { formatArticleDate } from '../utils/date';
 import SourceChip from '../components/SourceChip';
 
@@ -11,6 +11,10 @@ export default function ArticlePage() {
   const params = useParams();
   const articleId = params['*'];
   const navigate = useNavigate();
+  // the card we came from carries the article, so a failed lookup can still
+  // show the headline and link straight to the publisher's own page
+  const location = useLocation();
+  const passed = (location.state as { article?: Article } | null)?.article;
   const [intelligence, setIntelligence] = useState<ArticleIntelligence | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -41,43 +45,74 @@ export default function ArticlePage() {
   }
 
   if (error || !intelligence) {
-    // NYT (and other publishers) only expose part of their catalogue through
-    // their APIs, so an article we can list is not always one we can open.
+    // Publishers expose only part of their catalogue through their APIs, so an
+    // article we can list is not always one we can open. Show what we have and
+    // send the reader to the original rather than to a homepage.
     const isNyt = decodeURIComponent(articleId ?? '').startsWith('nyt://');
+    const publisher = passed?.source || (isNyt ? 'The New York Times' : 'the publisher');
+    const published = formatArticleDate(passed?.published_at, 'full');
+
     return (
-      <div className="mx-auto max-w-2xl px-4 py-16 text-center">
-        <div className="rounded-xl border border-ink-200 bg-white p-8 shadow-card">
-          <h1 className="font-serif text-xl font-bold text-ink-900">
-            {isNyt ? 'This New York Times article can’t be opened here' : 'Article unavailable'}
-          </h1>
-          <p className="mx-auto mt-3 max-w-md text-sm leading-relaxed text-ink-600">
-            {isNyt
-              ? 'The New York Times restricts full article access through its API — only headlines and summaries are available to this app. You can read the full piece on nytimes.com.'
-              : 'This article could not be loaded. It may no longer be available, or the publisher’s API is temporarily unreachable.'}
-          </p>
-          <div className="mt-6 flex flex-wrap justify-center gap-2">
-            {isNyt && (
-              <a
-                href="https://www.nytimes.com"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-brand-700"
-              >
-                Open nytimes.com
-              </a>
+      <div className="mx-auto max-w-3xl px-4 py-10">
+        <div className="overflow-hidden rounded-xl border border-ink-200 bg-white shadow-card">
+          {passed?.thumbnail && (
+            <img src={passed.thumbnail} alt="" className="h-56 w-full object-cover" />
+          )}
+          <div className="p-7">
+            {passed && (
+              <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-ink-500">
+                <SourceChip sourceId={passed.source_id} name={passed.source} size="xs" />
+                {passed.section && <span className="font-medium text-ink-600">{passed.section}</span>}
+                {published && <span>· {published}</span>}
+              </div>
             )}
-            <button
-              onClick={() => navigate(-1)}
-              className="rounded-lg border border-ink-200 px-4 py-2 text-sm font-semibold text-ink-700 transition-colors hover:bg-ink-50"
-            >
-              Go back
-            </button>
-            <button
-              onClick={() => navigate('/search')}
-              className="rounded-lg border border-ink-200 px-4 py-2 text-sm font-semibold text-ink-700 transition-colors hover:bg-ink-50"
-            >
-              Search news
-            </button>
+
+            <h1 className="font-serif text-2xl font-bold leading-snug text-ink-900">
+              {passed?.headline ?? 'This article can’t be opened here'}
+            </h1>
+
+            {passed?.trail_text && (
+              <p className="mt-3 leading-relaxed text-ink-700">{passed.trail_text}</p>
+            )}
+
+            <div className="mt-5 rounded-lg bg-warm-50 p-3.5 text-[13px] leading-relaxed text-warm-800">
+              {publisher} publishes only headlines and summaries through its API, so the full text
+              isn’t available in this app. Read the complete article on the publisher’s site.
+            </div>
+
+            <div className="mt-5 flex flex-wrap gap-2">
+              {passed?.url && (
+                <a
+                  href={passed.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="rounded-lg bg-brand-gradient px-4 py-2 text-sm font-semibold text-white shadow-glow transition-opacity hover:opacity-90"
+                >
+                  Read the full article ↗
+                </a>
+              )}
+              <button
+                onClick={() =>
+                  passed &&
+                  navigate('/', {
+                    state: {
+                      prefill: `Tell me about this article: "${passed.headline}"`,
+                      articleId: passed.article_id,
+                    },
+                  })
+                }
+                disabled={!passed}
+                className="rounded-lg border border-ink-200 px-4 py-2 text-sm font-semibold text-ink-700 transition-colors hover:bg-ink-50 disabled:opacity-40"
+              >
+                Ask AI about it
+              </button>
+              <button
+                onClick={() => navigate(-1)}
+                className="rounded-lg border border-ink-200 px-4 py-2 text-sm font-semibold text-ink-700 transition-colors hover:bg-ink-50"
+              >
+                Go back
+              </button>
+            </div>
           </div>
         </div>
       </div>
