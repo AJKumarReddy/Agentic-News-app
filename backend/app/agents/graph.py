@@ -283,14 +283,17 @@ def build_agent_graph(session: AsyncSession, understanding_llm=None, synthesis_l
         # The widening is reported as UI metadata, never as prose in the answer.
         notice = ""
         if not any(groups.values()) and (filters.from_date or filters.sections):
-            for window, label in ((RELAX_WINDOW_DAYS, f"last {RELAX_WINDOW_DAYS} days"), (None, "all indexed reporting")):
+            for window, label in (
+                (RELAX_WINDOW_DAYS, f"Last {RELAX_WINDOW_DAYS} days"),
+                (None, "All indexed reporting"),
+            ):
                 wider = RetrievalFilters(article_ids=filters.article_ids)
                 if window is not None and filters.from_date:
                     wider.from_date = filters.from_date - timedelta(days=window)
                 fallback = await tools.retrieve_rag(session, question, filters=wider, freshness=True)
                 if fallback:
                     groups = {"default": fallback}
-                    notice = f"No matches in the requested period — showing the {label}."
+                    notice = f"Results from {label}"
                     break
 
         evidence, sources = _chunks_to_evidence(groups)
