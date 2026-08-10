@@ -9,11 +9,11 @@ import type { ConversationSummary, NewsSourceInfo } from '../types';
 export default function Sidebar({
   refreshKey,
   theme,
-  onToggleTheme,
+  onSelectTheme,
 }: {
   refreshKey?: number;
   theme: Theme;
-  onToggleTheme: () => void;
+  onSelectTheme: (theme: Theme) => void;
 }) {
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [sources, setSources] = useState<NewsSourceInfo[]>([]);
@@ -165,7 +165,7 @@ export default function Sidebar({
       </div>
 
       <div className="border-t border-white/10 p-2">
-        <ThemeToggle theme={theme} onToggle={onToggleTheme} />
+        <ThemeToggle theme={theme} onSelect={onSelectTheme} />
       </div>
 
       <div className="border-t border-white/10 px-5 py-3 text-[10px] leading-relaxed text-white/35">
