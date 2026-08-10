@@ -18,6 +18,7 @@ from app.core.security import (
 from app.database.session import engine, init_db
 from app.sources.base import NewsSourceError
 from app.sources.registry import close_all
+from app.tasks import scheduler
 
 logger = logging.getLogger(__name__)
 
@@ -27,8 +28,10 @@ async def lifespan(app: FastAPI):
     settings = get_settings()
     configure_logging(settings.log_level)
     await init_db()
+    ingestion_task = scheduler.start(app)
     logger.info("News AI backend started (%s)", settings.environment)
     yield
+    await scheduler.stop(ingestion_task)
     await close_all()
     await engine.dispose()
 

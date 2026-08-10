@@ -237,12 +237,13 @@ curl https://api.mydomain.com/api/health
 
 **Certificate renewal** is automatic: the `certbot` compose service renews via webroot every 12 h; after renewal nginx picks up certs on its periodic reload (or `docker compose exec nginx nginx -s reload`).
 
-**Scheduled ingestion (optional):** keep the index warm with host cron:
+**Scheduled ingestion** runs inside the backend every 30 minutes by default — no cron needed. Tune it with `INGEST_INTERVAL_MINUTES`, or set `INGEST_ENABLED=false` to disable and drive it externally:
 
 ```bash
-crontab -e
-*/30 * * * * cd ~/guardian-ai-news-assistant && docker compose exec -T backend python -m app.tasks.ingest_recent >> /tmp/ingest.log 2>&1
+docker compose exec backend python -m app.tasks.ingest_recent
 ```
+
+Under multiple Gunicorn workers a short-lived Redis lock ensures exactly one worker performs each run, so publisher API usage isn't multiplied by the worker count.
 
 ## Hostinger domain + frontend hosting
 
