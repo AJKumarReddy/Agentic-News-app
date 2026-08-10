@@ -17,7 +17,7 @@ flowchart TB
     F -- HTTPS REST + SSE --> N[Nginx on AWS EC2]
     N --> B[FastAPI Backend<br/>Gunicorn + Uvicorn, Docker]
 
-    B --> AG[LangGraph Agent<br/>router → tools → synthesis]
+    B --> AG[LangGraph Agent<br/>understand → mode → evidence → synthesis]
     B --> PG[(PostgreSQL 16<br/>+ pgvector)]
     B --> R[(Redis cache)]
 
@@ -25,7 +25,8 @@ flowchart TB
     AG --> RAG[RAG Engine]
     RAG --> CH[Chunker 600–1000 tok]
     RAG --> EM[OpenAI Embeddings]
-    RAG --> HY[Hybrid Retrieval<br/>vector + keyword + recency]
+    AG --> W[Tavily Web Search<br/>gated, cited separately]
+    RAG --> HY[Hybrid Retrieval<br/>vector + keyword + recency + edition]
     HY --> PG
     HY --> RR[Reranker<br/>LLM / Cohere / none]
     RR --> LLM[OpenAI Chat Model]
@@ -37,8 +38,10 @@ flowchart TB
 | Decision | Choice | Why |
 |---|---|---|
 | Vector DB | **PostgreSQL + pgvector** | One database serves relational data *and* vectors — simplest, cheapest, transactional on a single EC2 instance. The `vector_store.py` interface is small enough to swap for Qdrant later if scale demands it. |
-| Agent | **LangGraph controlled graph** | Deterministic route: classify → decide source → (fetch fresh) → retrieve → rerank → (web search) → synthesize. Bounded, debuggable, no runaway autonomy. |
-| Web fallback | **Decision agent + Tavily** | A decision node picks `GUARDIAN`, `WEB`, or `BOTH` before fetching. Web results are supplementary, excluded from Guardian domains, and cited separately so they can never be mistaken for Guardian journalism. Disabled entirely when `TAVILY_API_KEY` is unset. |
+| Agent | **LangGraph controlled graph, four modes** | `understand` resolves the message into a standalone question and routes to ARTICLE / NEWS / WEB / BOTH. Each mode does only its own work — an article question never touches the search machinery. Bounded, debuggable, no runaway autonomy. |
+| Query resolution | **Resolve before searching** | Follow-ups ("search youtube for related news", "then do a google search") are rewritten against the conversation first. Searching raw words was the single largest source of wrong results. |
+| Web fallback | **Tavily, gated** | Web results exclude Guardian domains, must pass relevance/recency/domain gates, and are cited separately so they can never be mistaken for Guardian journalism. Disabled entirely when `TAVILY_API_KEY` is unset. |
+| Edition | **US desk preferred** | `productionOffice` is stored per article and boosts ranking (`PREFERRED_PRODUCTION_OFFICE=US`). A nudge, not a filter — better UK/AUS matches still win. |
 | Freshness | Guardian-API-first for "latest/today/this week" queries | A "latest news" question is answered from *current* Guardian results (indexed on the fly), never from stale vectors with high semantic scores. |
 | Dedup | Guardian article ID + SHA-256 content hash | An article is embedded once; re-embedding happens only if content or the embedding model changed. |
 | Streaming | Server-Sent Events | Pipeline status events + token streaming into the React UI. |
@@ -50,15 +53,16 @@ flowchart TB
 ├── backend/
 │   ├── app/
 │   │   ├── api/       chat, news, rag, health routers
-│   │   ├── agents/    LangGraph graph, intent router, date parsing, tools
+│   │   ├── agents/    LangGraph graph, understanding/routing, date parsing, tools
 │   │   ├── guardian/  Guardian API client + normalizer
 │   │   ├── rag/       chunker, embeddings, vector store, retrieval, reranker, ingestion
 │   │   ├── database/  SQLAlchemy models, session, repositories
 │   │   ├── llm/       chat model factory, prompts (grounding rules)
 │   │   ├── services/  chat orchestration/SSE, search cache, article intelligence
-│   │   ├── tasks/     scheduled ingestion job
+│   │   ├── tasks/     scheduled ingestion, edition backfill
+│   │   ├── websearch/ Tavily client + quality gates
 │   │   └── core/      config, JSON logging, security middleware
-│   ├── tests/         pytest suite (64 tests)
+│   ├── tests/         pytest suite (86 tests)
 │   └── evaluation/    20-question RAG evaluation harness
 ├── nginx/             production reverse-proxy config (EC2 path)
 ├── aws/               ECS Fargate task definitions + CodePipeline guide
@@ -90,7 +94,7 @@ Frontend dev server: `cd frontend && npm install && npm run dev` (proxies `/api`
 ### Tests
 
 ```bash
-cd backend && pytest -q          # 64 tests: Guardian client, chunking, dedup, retrieval fusion, reranking, router, API, security middleware
+cd backend && pytest -q          # 86 tests: Guardian client, chunking, dedup, retrieval fusion, edition boost, reranking, routing, API, security
 cd frontend && npm test          # vitest: SSE parser, citation components
 ```
 
@@ -104,19 +108,25 @@ cd backend && python evaluation/run_eval.py --base-url http://localhost:8000
 
 Checks citation presence, real `theguardian.com` URLs, honest refusals on unsupported questions (anti-hallucination), intent routing, and follow-up context retention.
 
-## Evidence sourcing: Guardian first, web when needed
+## The routing agent: Guardian, the web, or both
 
-A **decision agent** runs right after intent classification and picks where evidence comes from:
+One `understand` step resolves the message and routes it. Inspect its decision without spending a chat turn:
 
-| Plan | When | Path |
+```bash
+curl -X POST http://localhost:8000/api/intent -H "Content-Type: application/json" \
+  -d '{"message":"what do other outlets say about the merger"}'
+```
+
+| Route | When | Path |
 |---|---|---|
-| `GUARDIAN` | News and current events — the default | `fetch_fresh → retrieve → rerank` |
-| `WEB` | Not news at all (how-to, definitions, docs), or the user explicitly asked to search the web | `web_search` only |
-| `BOTH` | Needs Guardian reporting plus outside context or corroboration | Guardian retrieval, then `web_search` |
+| `ARTICLE` | Asking about the article you're viewing | Reads that article — no search, no filters |
+| `NEWS` | News and current events (the default) | Guardian fetch → retrieve → rerank |
+| `WEB` | Not news (how-to, definitions, docs) or "search the web" | Web search only |
+| `BOTH` | Needs reporting plus outside context | Guardian retrieval, then web |
 
-Guardian evidence is also topped up with web results automatically when retrieval returns at or below `WEB_SEARCH_THRESHOLD` sources, so a thin Guardian result set doesn't produce a dead-end answer.
+Naming a site ("search youtube") always reaches the web and bypasses the low-signal domain filter — if you ask for a site, you get that site. Guardian evidence is topped up from the web when retrieval returns at or below `WEB_SEARCH_THRESHOLD` sources. The route, intent, and resolved question are shown as a badge above every answer.
 
-**Citation integrity is enforced end to end.** Web results exclude `theguardian.com`, carry `type: "web"` plus their real domain, continue the same citation numbering, and are presented to the model under an explicit `NON-GUARDIAN WEB SOURCES` header with instructions to name the site and never attribute it to The Guardian. The UI renders them in amber with a `Web · domain` label, distinct from blue Guardian citations. With no `TAVILY_API_KEY` set, the decision agent always returns `GUARDIAN` and no web request is ever made.
+**Citation integrity is enforced end to end.** Web results exclude `theguardian.com`, carry `type: "web"` plus their real domain, continue the same citation numbering, and reach the model under an explicit non-Guardian header with instructions to name the site and never attribute it to The Guardian. Guardian and web evidence get separate context budgets, so long Guardian chunks can't starve web sources out of the prompt. Citation density scales with the answer: a single-article reply cites once, not on every bullet. The UI renders web citations in amber with a `Web · domain` label. With no `TAVILY_API_KEY`, no web request is ever made.
 
 ## How a question flows
 
@@ -138,6 +148,7 @@ See [.env.example](.env.example). Highlights:
 |---|---|
 | `GUARDIAN_API_KEY` / `OPENAI_API_KEY` | server-side only, never exposed to React |
 | `TAVILY_API_KEY` | optional web search; empty = Guardian-only mode |
+| `PREFERRED_PRODUCTION_OFFICE` / `EDITION_BOOST` | Guardian desk to favour in ranking (default `US`) |
 | `WEB_SEARCH_THRESHOLD` / `WEB_SEARCH_MAX_RESULTS` | when to top up with web sources, and how many |
 | `CHAT_MODEL`, `EMBEDDING_MODEL`, `EMBEDDING_DIMENSIONS` | model selection (modular providers) |
 | `DATABASE_URL`, `REDIS_URL` | infrastructure |
@@ -279,6 +290,7 @@ Point `@` and `www` A records at the EC2 Elastic IP, issue certs for those names
 | `GET /api/news/article/{id}/intelligence` | AI summary, key points, entities, topics, dates + related articles |
 | `POST /api/rag/retrieve` | hybrid retrieval with metadata filters |
 | `POST /api/rag/ingest` | index articles by IDs and/or search query |
+| `POST /api/intent` | routing decision only — no search, no answer |
 | `GET /api/conversations`, `GET /api/conversations/{id}` | chat history (scoped to the caller's `X-Client-Id`) |
 | `DELETE /api/conversations/{id}` | delete one chat; 404 if it belongs to another client |
 | `DELETE /api/conversations` | clear the caller's chat history |
