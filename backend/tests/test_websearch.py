@@ -1,7 +1,23 @@
 import httpx
+import pytest
 
+import app.websearch.client as websearch_module
 from app.agents.graph import _web_to_evidence
 from app.websearch.client import TavilyClient, WebResult
+
+
+@pytest.fixture(autouse=True)
+def no_cache(monkeypatch):
+    """Bypass Redis so these tests exercise HTTP behavior, not cache state."""
+
+    async def miss(key):
+        return None
+
+    async def noop(key, value, ttl=None):
+        return None
+
+    monkeypatch.setattr(websearch_module, "cache_get", miss)
+    monkeypatch.setattr(websearch_module, "cache_set", noop)
 
 TAVILY_PAYLOAD = {
     "results": [

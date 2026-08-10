@@ -279,7 +279,9 @@ Point `@` and `www` A records at the EC2 Elastic IP, issue certs for those names
 | `GET /api/news/article/{id}/intelligence` | AI summary, key points, entities, topics, dates + related articles |
 | `POST /api/rag/retrieve` | hybrid retrieval with metadata filters |
 | `POST /api/rag/ingest` | index articles by IDs and/or search query |
-| `GET /api/conversations`, `GET /api/conversations/{id}` | chat history |
+| `GET /api/conversations`, `GET /api/conversations/{id}` | chat history (scoped to the caller's `X-Client-Id`) |
+| `DELETE /api/conversations/{id}` | delete one chat; 404 if it belongs to another client |
+| `DELETE /api/conversations` | clear the caller's chat history |
 | `GET /api/health` | component status: database, vector extension, cache, Guardian API |
 
 ## Security checklist (production)

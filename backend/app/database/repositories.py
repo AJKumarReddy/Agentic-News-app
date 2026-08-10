@@ -88,6 +88,22 @@ class ConversationRepository:
         )
         return list(result.scalars())
 
+    async def delete(self, conversation_id: str, user_id: str = "") -> bool:
+        """Delete one conversation (and its messages, via cascade).
+        Returns False when it doesn't exist or belongs to another client."""
+        conversation = await self.get(conversation_id, user_id=user_id)
+        if conversation is None:
+            return False
+        await self.session.delete(conversation)
+        return True
+
+    async def delete_all(self, user_id: str) -> int:
+        """Delete every conversation owned by this client. Returns the count."""
+        result = await self.session.execute(
+            delete(Conversation).where(Conversation.user_id == user_id)
+        )
+        return result.rowcount or 0
+
     async def add_message(self, conversation: Conversation, role: str, content: str, sources: list | None = None) -> Message:
         message = Message(
             conversation_id=conversation.id, role=role, content=content, sources=sources or []

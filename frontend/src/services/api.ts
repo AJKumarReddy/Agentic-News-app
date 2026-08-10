@@ -64,6 +64,14 @@ export async function getConversation(id: string): Promise<ConversationDetail> {
   return data;
 }
 
+export async function deleteConversation(id: string): Promise<void> {
+  await http.delete(`/conversations/${id}`);
+}
+
+export async function deleteAllConversations(): Promise<void> {
+  await http.delete('/conversations');
+}
+
 /**
  * Streaming chat via fetch + SSE. Calls onEvent for every server event.
  * Returns when the stream closes; throws on network/HTTP failure.
