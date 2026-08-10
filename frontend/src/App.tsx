@@ -1,15 +1,17 @@
 import { useState } from 'react';
 import { Route, Routes } from 'react-router-dom';
 import Sidebar from './components/Sidebar';
+import { useTheme } from './hooks/useTheme';
 import ArticlePage from './pages/ArticlePage';
 import ChatPage from './pages/ChatPage';
 import SearchPage from './pages/SearchPage';
 
 export default function App() {
   const [sidebarRefresh, setSidebarRefresh] = useState(0);
+  const { theme, toggle } = useTheme();
   return (
     <div className="flex h-full">
-      <Sidebar refreshKey={sidebarRefresh} />
+      <Sidebar refreshKey={sidebarRefresh} theme={theme} onToggleTheme={toggle} />
       <main className="min-w-0 flex-1">
         <Routes>
           <Route

@@ -12,9 +12,9 @@ export default function ArticleCard({ article }: { article: Article }) {
     article.source_id === 'nyt' ? 'from-accent-400 to-accent-600' : 'from-brand-400 to-brand-600';
 
   return (
-    <article className="group flex flex-col overflow-hidden rounded-xl border border-ink-200 bg-white shadow-card transition-all duration-200 hover:-translate-y-0.5 hover:border-brand-200 hover:shadow-lift">
+    <article className="group flex flex-col overflow-hidden rounded-xl border border-ink-200 dark:border-ink-700 bg-white dark:bg-ink-800 shadow-card transition-all duration-200 hover:-translate-y-0.5 hover:border-brand-200 hover:shadow-lift">
       {article.thumbnail ? (
-        <Link to={href} state={{ article }} className="block overflow-hidden bg-ink-100">
+        <Link to={href} state={{ article }} className="block overflow-hidden bg-ink-100 dark:bg-ink-700">
           <img
             src={article.thumbnail}
             alt=""
@@ -27,23 +27,23 @@ export default function ArticleCard({ article }: { article: Article }) {
       )}
 
       <div className="flex flex-1 flex-col p-4">
-        <div className="mb-2 flex flex-wrap items-center gap-1.5 text-[11px] text-ink-500">
+        <div className="mb-2 flex flex-wrap items-center gap-1.5 text-[11px] text-ink-500 dark:text-ink-400 dark:text-ink-500">
           <SourceChip sourceId={article.source_id} name={article.source} size="xs" />
-          {article.section && <span className="font-medium text-ink-600">{article.section}</span>}
+          {article.section && <span className="font-medium text-ink-600 dark:text-ink-300">{article.section}</span>}
           {published && <span>· {published}</span>}
         </div>
 
         <Link
           to={href}
           state={{ article }}
-          className="font-serif text-[17px] font-bold leading-snug text-ink-900 transition-colors group-hover:text-brand-700"
+          className="font-serif text-[17px] font-bold leading-snug text-ink-900 dark:text-ink-50 transition-colors group-hover:text-brand-700"
         >
           {article.headline}
         </Link>
 
-        {article.author && <div className="mt-1.5 text-xs text-ink-500">{article.author}</div>}
+        {article.author && <div className="mt-1.5 text-xs text-ink-500 dark:text-ink-400 dark:text-ink-500">{article.author}</div>}
         {article.trail_text && (
-          <p className="mt-2 line-clamp-3 text-[13px] leading-relaxed text-ink-600">
+          <p className="mt-2 line-clamp-3 text-[13px] leading-relaxed text-ink-600 dark:text-ink-300">
             {article.trail_text}
           </p>
         )}
@@ -53,7 +53,7 @@ export default function ArticleCard({ article }: { article: Article }) {
             href={article.url}
             target="_blank"
             rel="noopener noreferrer"
-            className="rounded-lg border border-ink-200 px-3 py-1.5 text-xs font-semibold text-ink-700 transition-colors hover:border-ink-300 hover:bg-ink-50"
+            className="rounded-lg border border-ink-200 dark:border-ink-700 px-3 py-1.5 text-xs font-semibold text-ink-700 dark:text-ink-200 transition-colors hover:border-ink-300 dark:border-ink-600 hover:bg-ink-50 dark:bg-ink-800"
           >
             Read
           </a>

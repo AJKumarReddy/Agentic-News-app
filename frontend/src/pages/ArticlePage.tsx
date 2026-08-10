@@ -39,7 +39,7 @@ export default function ArticlePage() {
             <div key={i} className="h-4 skeleton rounded" />
           ))}
         </div>
-        <p className="mt-4 text-sm text-ink-500">Analysing the article…</p>
+        <p className="mt-4 text-sm text-ink-500 dark:text-ink-400 dark:text-ink-500">Analysing the article…</p>
       </div>
     );
   }
@@ -54,28 +54,28 @@ export default function ArticlePage() {
 
     return (
       <div className="mx-auto max-w-3xl px-4 py-10">
-        <div className="overflow-hidden rounded-xl border border-ink-200 bg-white shadow-card">
+        <div className="overflow-hidden rounded-xl border border-ink-200 dark:border-ink-700 bg-white dark:bg-ink-800 shadow-card">
           {passed?.thumbnail && (
             <img src={passed.thumbnail} alt="" className="h-56 w-full object-cover" />
           )}
           <div className="p-7">
             {passed && (
-              <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-ink-500">
+              <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-ink-500 dark:text-ink-400 dark:text-ink-500">
                 <SourceChip sourceId={passed.source_id} name={passed.source} size="xs" />
-                {passed.section && <span className="font-medium text-ink-600">{passed.section}</span>}
+                {passed.section && <span className="font-medium text-ink-600 dark:text-ink-300">{passed.section}</span>}
                 {published && <span>· {published}</span>}
               </div>
             )}
 
-            <h1 className="font-serif text-2xl font-bold leading-snug text-ink-900">
+            <h1 className="font-serif text-2xl font-bold leading-snug text-ink-900 dark:text-ink-50">
               {passed?.headline ?? 'This article can’t be opened here'}
             </h1>
 
             {passed?.trail_text && (
-              <p className="mt-3 leading-relaxed text-ink-700">{passed.trail_text}</p>
+              <p className="mt-3 leading-relaxed text-ink-700 dark:text-ink-200">{passed.trail_text}</p>
             )}
 
-            <div className="mt-5 rounded-lg bg-warm-50 p-3.5 text-[13px] leading-relaxed text-warm-800">
+            <div className="mt-5 rounded-lg bg-warm-50 p-3.5 text-[13px] leading-relaxed text-warm-800 dark:text-warm-200">
               {publisher} publishes only headlines and summaries through its API, so the full text
               isn’t available in this app. Read the complete article on the publisher’s site.
             </div>
@@ -102,13 +102,13 @@ export default function ArticlePage() {
                   })
                 }
                 disabled={!passed}
-                className="rounded-lg border border-ink-200 px-4 py-2 text-sm font-semibold text-ink-700 transition-colors hover:bg-ink-50 disabled:opacity-40"
+                className="rounded-lg border border-ink-200 dark:border-ink-700 px-4 py-2 text-sm font-semibold text-ink-700 dark:text-ink-200 transition-colors hover:bg-ink-50 dark:bg-ink-800 disabled:opacity-40"
               >
                 Ask AI about it
               </button>
               <button
                 onClick={() => navigate(-1)}
-                className="rounded-lg border border-ink-200 px-4 py-2 text-sm font-semibold text-ink-700 transition-colors hover:bg-ink-50"
+                className="rounded-lg border border-ink-200 dark:border-ink-700 px-4 py-2 text-sm font-semibold text-ink-700 dark:text-ink-200 transition-colors hover:bg-ink-50 dark:bg-ink-800"
               >
                 Go back
               </button>
@@ -125,17 +125,17 @@ export default function ArticlePage() {
   return (
     <div className="h-full overflow-y-auto">
       <div className="mx-auto max-w-4xl px-4 py-8">
-        <div className="flex flex-wrap items-center gap-2 text-xs text-ink-500">
+        <div className="flex flex-wrap items-center gap-2 text-xs text-ink-500 dark:text-ink-400 dark:text-ink-500">
           <SourceChip sourceId={article.source_id} name={article.source} size="xs" />
           {article.section && (
-            <span className="font-medium text-ink-600">
+            <span className="font-medium text-ink-600 dark:text-ink-300">
               {article.section}
             </span>
           )}
           {published && <span>{published}</span>}
           {article.author && <span>· {article.author}</span>}
         </div>
-        <h1 className="mt-2 font-serif text-3xl font-bold leading-tight text-ink-900">
+        <h1 className="mt-2 font-serif text-3xl font-bold leading-tight text-ink-900 dark:text-ink-50">
           {article.headline}
         </h1>
         {article.thumbnail && (
@@ -147,7 +147,7 @@ export default function ArticlePage() {
             href={article.url}
             target="_blank"
             rel="noopener noreferrer"
-            className="rounded-lg border border-ink-200 px-4 py-2 text-sm font-semibold text-ink-700 hover:bg-ink-50"
+            className="rounded-lg border border-ink-200 dark:border-ink-700 px-4 py-2 text-sm font-semibold text-ink-700 dark:text-ink-200 hover:bg-ink-50 dark:bg-ink-800"
           >
             Read the original
           </a>
@@ -167,16 +167,16 @@ export default function ArticlePage() {
         </div>
 
         {analysis.summary && (
-          <section className="mt-8 rounded-xl border border-ink-200 bg-white p-5 shadow-card">
-            <h2 className="text-sm font-semibold uppercase tracking-wider text-ink-500">AI Summary</h2>
-            <p className="mt-2 leading-relaxed text-ink-800">{analysis.summary}</p>
+          <section className="mt-8 rounded-xl border border-ink-200 dark:border-ink-700 bg-white dark:bg-ink-800 p-5 shadow-card">
+            <h2 className="text-sm font-semibold uppercase tracking-wider text-ink-500 dark:text-ink-400 dark:text-ink-500">AI Summary</h2>
+            <p className="mt-2 leading-relaxed text-ink-800 dark:text-ink-100">{analysis.summary}</p>
           </section>
         )}
 
         {analysis.key_points.length > 0 && (
-          <section className="mt-4 rounded-xl border border-ink-200 bg-white p-5 shadow-card">
-            <h2 className="text-sm font-semibold uppercase tracking-wider text-ink-500">Key Points</h2>
-            <ul className="mt-2 list-disc space-y-1.5 pl-5 text-ink-800">
+          <section className="mt-4 rounded-xl border border-ink-200 dark:border-ink-700 bg-white dark:bg-ink-800 p-5 shadow-card">
+            <h2 className="text-sm font-semibold uppercase tracking-wider text-ink-500 dark:text-ink-400 dark:text-ink-500">Key Points</h2>
+            <ul className="mt-2 list-disc space-y-1.5 pl-5 text-ink-800 dark:text-ink-100">
               {analysis.key_points.map((point, i) => (
                 <li key={i}>{point}</li>
               ))}
@@ -186,11 +186,11 @@ export default function ArticlePage() {
 
         <div className="mt-4 grid gap-4 md:grid-cols-2">
           {analysis.entities.length > 0 && (
-            <section className="rounded-xl border border-ink-200 bg-white p-5 shadow-card">
-              <h2 className="text-sm font-semibold uppercase tracking-wider text-ink-500">Entities</h2>
+            <section className="rounded-xl border border-ink-200 dark:border-ink-700 bg-white dark:bg-ink-800 p-5 shadow-card">
+              <h2 className="text-sm font-semibold uppercase tracking-wider text-ink-500 dark:text-ink-400 dark:text-ink-500">Entities</h2>
               <div className="mt-2 flex flex-wrap gap-1.5">
                 {analysis.entities.map((entity, i) => (
-                  <span key={i} className="rounded-full bg-ink-100 px-2.5 py-1 text-xs text-ink-700">
+                  <span key={i} className="rounded-full bg-ink-100 px-2.5 py-1 text-xs text-ink-700 dark:bg-ink-700 dark:text-ink-200">
                     {entity}
                   </span>
                 ))}
@@ -198,13 +198,13 @@ export default function ArticlePage() {
             </section>
           )}
           {analysis.topics.length > 0 && (
-            <section className="rounded-xl border border-ink-200 bg-white p-5 shadow-card">
-              <h2 className="text-sm font-semibold uppercase tracking-wider text-ink-500">Topics</h2>
+            <section className="rounded-xl border border-ink-200 dark:border-ink-700 bg-white dark:bg-ink-800 p-5 shadow-card">
+              <h2 className="text-sm font-semibold uppercase tracking-wider text-ink-500 dark:text-ink-400 dark:text-ink-500">Topics</h2>
               <div className="mt-2 flex flex-wrap gap-1.5">
                 {analysis.topics.map((topic, i) => (
                   <span
                     key={i}
-                    className="rounded-full bg-brand-50 px-2.5 py-1 text-xs text-brand-700"
+                    className="rounded-full bg-brand-50 px-2.5 py-1 text-xs text-brand-700 dark:bg-brand-500/20 dark:text-brand-200"
                   >
                     {topic}
                   </span>
@@ -215,11 +215,11 @@ export default function ArticlePage() {
         </div>
 
         {analysis.important_dates.length > 0 && (
-          <section className="mt-4 rounded-xl border border-ink-200 bg-white p-5 shadow-card">
-            <h2 className="text-sm font-semibold uppercase tracking-wider text-ink-500">
+          <section className="mt-4 rounded-xl border border-ink-200 dark:border-ink-700 bg-white dark:bg-ink-800 p-5 shadow-card">
+            <h2 className="text-sm font-semibold uppercase tracking-wider text-ink-500 dark:text-ink-400 dark:text-ink-500">
               Important Dates
             </h2>
-            <ul className="mt-2 space-y-1.5 text-sm text-ink-800">
+            <ul className="mt-2 space-y-1.5 text-sm text-ink-800 dark:text-ink-100">
               {analysis.important_dates.map((entry, i) => (
                 <li key={i}>{entry}</li>
               ))}

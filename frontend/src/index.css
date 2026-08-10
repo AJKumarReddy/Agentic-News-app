@@ -9,7 +9,10 @@ body,
 }
 
 body {
-  @apply bg-ink-50 text-ink-900 antialiased;
+  @apply bg-ink-50 text-ink-900 antialiased transition-colors duration-200;
+}
+.dark body {
+  @apply bg-ink-900 text-ink-100;
   font-feature-settings: 'cv02', 'cv03', 'cv04';
 }
 
@@ -31,12 +34,12 @@ body {
 
 /* markdown body inside chat bubbles */
 .prose-chat {
-  @apply text-[15px] leading-relaxed text-ink-800;
+  @apply text-[15px] leading-relaxed text-ink-800 dark:text-ink-200;
 }
 .prose-chat h1,
 .prose-chat h2,
 .prose-chat h3 {
-  @apply mt-5 mb-2 font-semibold text-ink-900;
+  @apply mt-5 mb-2 font-semibold text-ink-900 dark:text-ink-50;
 }
 .prose-chat h2 {
   @apply text-[17px];
@@ -60,22 +63,22 @@ body {
   @apply my-3 w-full border-collapse overflow-hidden rounded-lg text-sm;
 }
 .prose-chat th {
-  @apply bg-ink-100 px-3 py-2 text-left font-semibold text-ink-700;
+  @apply bg-ink-100 px-3 py-2 text-left font-semibold text-ink-700 dark:bg-ink-700 dark:text-ink-200;
 }
 .prose-chat td {
-  @apply border-t border-ink-200 px-3 py-2 align-top;
+  @apply border-t border-ink-200 px-3 py-2 align-top dark:border-ink-700;
 }
 .prose-chat a {
   @apply text-accent-700 underline decoration-accent-300 underline-offset-2 hover:decoration-accent-600;
 }
 .prose-chat strong {
-  @apply font-semibold text-ink-900;
+  @apply font-semibold text-ink-900 dark:text-ink-50;
 }
 .prose-chat code {
-  @apply rounded bg-ink-100 px-1.5 py-0.5 text-[13px] text-ink-800;
+  @apply rounded bg-ink-100 px-1.5 py-0.5 text-[13px] text-ink-800 dark:bg-ink-700 dark:text-ink-100;
 }
 .prose-chat blockquote {
-  @apply my-3 border-l-2 border-brand-200 pl-3 text-ink-600;
+  @apply my-3 border-l-2 border-brand-200 pl-3 text-ink-600 dark:border-brand-500/40 dark:text-ink-300;
 }
 
 /* citation chips — publisher vs web are visually distinct so a reader can
@@ -83,12 +86,14 @@ body {
 .citation-badge {
   @apply mx-0.5 inline-flex h-[17px] min-w-[17px] cursor-pointer items-center justify-center rounded
          bg-brand-100 px-1 align-super text-[10px] font-bold text-brand-700 no-underline
-         transition-colors hover:bg-brand-600 hover:text-white;
+         transition-colors hover:bg-brand-600 hover:text-white
+         dark:bg-brand-500/25 dark:text-brand-200 dark:hover:bg-brand-500 dark:hover:text-white;
 }
 .citation-badge-web {
   @apply mx-0.5 inline-flex h-[17px] min-w-[17px] cursor-pointer items-center justify-center rounded
          bg-warm-100 px-1 align-super text-[10px] font-bold text-warm-700 no-underline
-         transition-colors hover:bg-warm-500 hover:text-white;
+         transition-colors hover:bg-warm-500 hover:text-white
+         dark:bg-warm-500/25 dark:text-warm-200 dark:hover:bg-warm-500 dark:hover:text-white;
 }
 
 /* headline treatment: primary into secondary */
@@ -98,7 +103,7 @@ body {
 
 /* skeleton loading */
 .skeleton {
-  @apply rounded bg-ink-200;
+  @apply rounded bg-ink-200 dark:bg-ink-700;
   background-image: linear-gradient(
     90deg,
     theme('colors.ink.200') 0px,
@@ -107,4 +112,13 @@ body {
   );
   background-size: 1000px 100%;
   @apply animate-shimmer;
+}
+
+.dark .skeleton {
+  background-image: linear-gradient(
+    90deg,
+    theme('colors.ink.700') 0px,
+    theme('colors.ink.600') 200px,
+    theme('colors.ink.700') 400px
+  );
 }

@@ -76,13 +76,13 @@ export default function SearchPage() {
   };
 
   const inputClass =
-    'rounded-lg border border-ink-200 bg-white px-3 py-2 text-sm text-ink-800 transition-colors focus:border-accent-400 focus:outline-none focus:ring-2 focus:ring-accent-100';
+    'rounded-lg border border-ink-200 dark:border-ink-700 bg-white dark:bg-ink-800 px-3 py-2 text-sm text-ink-800 dark:text-ink-100 transition-colors focus:border-accent-400 focus:outline-none focus:ring-2 focus:ring-accent-100';
 
   return (
-    <div className="h-full overflow-y-auto bg-brand-soft">
+    <div className="h-full overflow-y-auto bg-brand-soft dark:bg-brand-soft-dark">
       <div className="mx-auto max-w-6xl px-4 py-7">
         <h1 className="gradient-text font-serif text-2xl font-bold">Search the news</h1>
-        <p className="mt-1 text-sm text-ink-500">
+        <p className="mt-1 text-sm text-ink-500 dark:text-ink-400 dark:text-ink-500">
           Across {sources.length > 0 ? sources.map((s) => s.name).join(' and ') : 'all newsrooms'}
         </p>
 
@@ -141,7 +141,7 @@ export default function SearchPage() {
 
         {sources.length > 1 && (
           <div className="mt-3 flex flex-wrap items-center gap-2">
-            <span className="text-[11px] font-medium uppercase tracking-wider text-ink-400">Sources</span>
+            <span className="text-[11px] font-medium uppercase tracking-wider text-ink-400 dark:text-ink-500">Sources</span>
             {sources.map((source) => {
               const selected = !activeSources || activeSources.split(',').includes(source.id);
               return (
@@ -150,8 +150,8 @@ export default function SearchPage() {
                   onClick={() => toggleSource(source.id)}
                   className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
                     selected
-                      ? 'border-accent-300 bg-accent-50 text-accent-700'
-                      : 'border-ink-200 bg-white text-ink-400 hover:border-ink-300'
+                      ? 'border-accent-300 bg-accent-50 text-accent-700 dark:bg-accent-500/20 dark:text-accent-200'
+                      : 'border-ink-200 dark:border-ink-700 bg-white dark:bg-ink-800 text-ink-400 dark:text-ink-500 hover:border-ink-300 dark:border-ink-600'
                   }`}
                 >
                   {source.name}
@@ -177,7 +177,7 @@ export default function SearchPage() {
 
         {!loading && result && (
           <>
-            <div className="mt-6 text-sm text-ink-500">
+            <div className="mt-6 text-sm text-ink-500 dark:text-ink-400 dark:text-ink-500">
               {result.articles.length} article{result.articles.length === 1 ? '' : 's'} · page{' '}
               {result.page}
             </div>
@@ -187,7 +187,7 @@ export default function SearchPage() {
               ))}
             </div>
             {result.articles.length === 0 && (
-              <div className="mt-10 text-center text-sm text-ink-500">
+              <div className="mt-10 text-center text-sm text-ink-500 dark:text-ink-400 dark:text-ink-500">
                 No articles matched. Try broader keywords or a different section.
               </div>
             )}
@@ -195,14 +195,14 @@ export default function SearchPage() {
               <button
                 disabled={page <= 1 || loading}
                 onClick={() => runSearch(page - 1)}
-                className="rounded-lg border border-ink-200 bg-white px-4 py-2 text-sm font-medium text-ink-700 transition-colors hover:border-ink-300 disabled:opacity-40"
+                className="rounded-lg border border-ink-200 dark:border-ink-700 bg-white dark:bg-ink-800 px-4 py-2 text-sm font-medium text-ink-700 dark:text-ink-200 transition-colors hover:border-ink-300 dark:border-ink-600 disabled:opacity-40"
               >
                 ← Previous
               </button>
               <button
                 disabled={page >= result.pages || loading}
                 onClick={() => runSearch(page + 1)}
-                className="rounded-lg border border-ink-200 bg-white px-4 py-2 text-sm font-medium text-ink-700 transition-colors hover:border-ink-300 disabled:opacity-40"
+                className="rounded-lg border border-ink-200 dark:border-ink-700 bg-white dark:bg-ink-800 px-4 py-2 text-sm font-medium text-ink-700 dark:text-ink-200 transition-colors hover:border-ink-300 dark:border-ink-600 disabled:opacity-40"
               >
                 Next →
               </button>

@@ -19,9 +19,9 @@ function MessageBubble({ message }: { message: ChatMessage }) {
 
   return (
     <div className="flex animate-fade-up justify-start">
-      <div className="w-full max-w-[94%] rounded-2xl rounded-bl-md border border-ink-200 bg-white px-5 py-4 shadow-card">
+      <div className="w-full max-w-[94%] rounded-2xl rounded-bl-md border border-ink-200 dark:border-ink-700 bg-white dark:bg-ink-800 px-5 py-4 shadow-card">
         {message.status && (
-          <div className="flex items-center gap-2 py-1 text-sm text-ink-500">
+          <div className="flex items-center gap-2 py-1 text-sm text-ink-500 dark:text-ink-400 dark:text-ink-500">
             <span className="relative flex h-2 w-2">
               <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent-400 opacity-75" />
               <span className="relative inline-flex h-2 w-2 rounded-full bg-accent-500" />
@@ -33,7 +33,7 @@ function MessageBubble({ message }: { message: ChatMessage }) {
         {message.routing && !message.streaming && <RouteBadge routing={message.routing} />}
 
         {message.notice && !message.streaming && (
-          <div className="mb-3 inline-flex items-center gap-1.5 rounded-md bg-warm-50 px-2.5 py-1 text-[11px] font-medium text-warm-800">
+          <div className="mb-3 inline-flex items-center gap-1.5 rounded-md bg-warm-50 px-2.5 py-1 text-[11px] font-medium text-warm-800 dark:text-warm-200">
             <span aria-hidden="true">◷</span>
             {message.notice}
           </div>
