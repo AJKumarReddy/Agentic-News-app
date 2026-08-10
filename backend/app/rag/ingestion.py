@@ -105,6 +105,7 @@ async def ingest_articles(
                         author=normalized.author,
                         url=normalized.url,
                         tags=normalized.tags,
+                        production_office=normalized.production_office,
                     )
                     for piece, vector in zip(pieces, vectors)
                 ]

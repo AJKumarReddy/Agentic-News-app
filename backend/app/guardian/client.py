@@ -16,7 +16,9 @@ from app.guardian.normalizer import normalize_article
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_SHOW_FIELDS = "headline,trailText,body,bodyText,thumbnail,byline,publication,shortUrl"
+DEFAULT_SHOW_FIELDS = (
+    "headline,trailText,body,bodyText,thumbnail,byline,publication,shortUrl,productionOffice"
+)
 DEFAULT_SHOW_TAGS = "contributor,keyword"
 
 

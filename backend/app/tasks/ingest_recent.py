@@ -22,7 +22,9 @@ from app.rag.ingestion import ingest_articles
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_SECTIONS = ["technology", "politics", "business", "world", "environment"]
+# us-news first: the app favours the Guardian's US desk, so keep that
+# section warm in the index rather than relying on ranking alone
+DEFAULT_SECTIONS = ["us-news", "technology", "business", "world", "politics", "environment"]
 
 
 async def ingest_recent(sections: list[str] | None = None, days_back: int = 1) -> None:

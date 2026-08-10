@@ -1,4 +1,4 @@
-# Agentic News App — Guardian AI News Assistant
+# Guardian News AI
 
 A production-ready AI news research application built on the [Guardian Open Platform](https://open-platform.theguardian.com/). It combines live Guardian search, a RAG pipeline over indexed articles, and a controlled LangGraph agent to answer natural-language questions with **grounded, citation-backed answers** — including summaries, comparisons, timelines, and follow-up questions.
 

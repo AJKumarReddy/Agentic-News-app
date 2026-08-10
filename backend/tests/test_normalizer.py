@@ -12,6 +12,7 @@ SAMPLE_ITEM = {
         "body": "<p>First paragraph about the model.</p><figure>ignored</figure><p>Second paragraph with <a href='#'>a link</a>.</p><script>evil()</script>",
         "thumbnail": "https://media.guim.co.uk/thumb.jpg",
         "byline": "Jane Reporter",
+        "productionOffice": "US",
     },
     "tags": [
         {"id": "technology/openai", "type": "keyword", "webTitle": "OpenAI"},
@@ -40,6 +41,13 @@ def test_normalize_article_fields():
     assert article.published_at is not None
     assert article.published_at.year == 2026
     assert article.source == "The Guardian"
+    assert article.production_office == "US"
+
+
+def test_production_office_absent_is_empty_not_none():
+    item = dict(SAMPLE_ITEM)
+    item["fields"] = {k: v for k, v in SAMPLE_ITEM["fields"].items() if k != "productionOffice"}
+    assert normalize_article(item).production_office == ""
 
 
 def test_content_hash_stable_and_sensitive():

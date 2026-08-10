@@ -6,9 +6,9 @@ import { getConversation } from '../services/api';
 import { useChat } from '../hooks/useChat';
 
 const SUGGESTED_QUESTIONS = [
-  'Latest AI developments',
+  'Top US news today',
   'US politics this week',
-  'Climate stories today',
+  'Latest AI developments',
   'Compare coverage of OpenAI and Anthropic',
 ];
 
@@ -72,7 +72,7 @@ export default function ChatPage({ onConversationChange }: { onConversationChang
         <div className="mx-auto max-w-3xl px-4 py-6">
           {empty ? (
             <div className="mt-16 text-center">
-              <h1 className="font-serif text-3xl font-bold text-brand-900">News AI</h1>
+              <h1 className="font-serif text-3xl font-bold text-brand-900">Guardian News AI</h1>
               <p className="mt-2 text-slate-600">
                 Research the news with AI — grounded answers, every claim cited.
               </p>

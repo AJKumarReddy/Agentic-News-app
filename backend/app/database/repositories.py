@@ -34,6 +34,7 @@ class ArticleRepository:
         article.trail_text = normalized.trail_text
         article.body_text = normalized.body_text
         article.tags = normalized.tags
+        article.production_office = normalized.production_office
         article.source = normalized.source
         article.retrieved_at = normalized.retrieved_at
         return article

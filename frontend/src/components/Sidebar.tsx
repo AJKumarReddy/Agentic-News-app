@@ -54,7 +54,7 @@ export default function Sidebar({ refreshKey }: { refreshKey?: number }) {
   return (
     <aside className="hidden md:flex w-64 shrink-0 flex-col bg-brand-900 text-white">
       <Link to="/" className="px-4 py-5 border-b border-brand-800">
-        <div className="font-serif text-xl font-bold leading-tight">News AI</div>
+        <div className="font-serif text-xl font-bold leading-tight">Guardian News AI</div>
         <div className="text-xs text-brand-100/80 mt-0.5">Research Assistant</div>
       </Link>
 

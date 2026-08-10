@@ -76,5 +76,6 @@ def normalize_article(item: dict[str, Any]) -> NormalizedArticle:
         trail_text=trail_text,
         body_text=body_text,
         tags=keyword_tags,
+        production_office=(fields.get("productionOffice") or "").upper(),
         content_hash=content_hash(body_text or trail_text or item.get("webTitle", "")),
     )
