@@ -52,8 +52,11 @@ class Settings(BaseSettings):
 
     # Scheduled ingestion: keeps the index current without an external cron
     ingest_enabled: bool = True
-    ingest_interval_minutes: int = 30
+    ingest_interval_minutes: int = 5
     ingest_start_delay_seconds: int = 60
+    # sections refreshed per tick; interval × this must stay under the
+    # publishers' 500 requests/day developer cap (see rotating_sections)
+    ingest_sections_per_tick: int = 1
 
     # Security layer
     rate_limit_per_minute: int = 30
