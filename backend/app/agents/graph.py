@@ -11,7 +11,6 @@ always grounded in the evidence collected by earlier nodes.
 
 import logging
 import re
-from datetime import datetime, time
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -23,15 +22,17 @@ from app.agents.router import classify
 from app.agents.state import AgentState
 from app.core.config import get_settings
 from app.core.logging import log_event
-from app.llm.client import get_chat_model
+from app.llm.client import get_chat_model, response_text
 from app.llm.prompts import SYSTEM_PROMPT, build_synthesis_prompt
 from app.rag.vector_store import RetrievalFilters, ScoredChunk
 
 logger = logging.getLogger(__name__)
 
+# Intents answered Guardian-API-first (fresh articles fetched and indexed)
 FRESH_INTENTS = {
     "LATEST_NEWS",
     "ARTICLE_SEARCH",
+    "ARTICLE_QA",
     "ENTITY_RESEARCH",
     "COMPARISON",
     "TIMELINE",
@@ -42,14 +43,26 @@ FRESH_INTENTS = {
 MAX_EVIDENCE_CHARS = 14000  # hard cap on retrieval context sent to the LLM
 
 
+def route_after_classify(state: AgentState) -> str:
+    """The single routing policy: which node follows classification.
+    Also used by the chat service to announce pipeline progress."""
+    if state.get("intent") == "SOURCE_LOOKUP":
+        return "retrieve"
+    if state.get("intent") in FRESH_INTENTS or state.get("freshness"):
+        return "fetch_fresh"
+    return "retrieve"
+
+
+def _advance(state: AgentState, *steps: str) -> dict[str, Any]:
+    return {"steps": state.get("steps", []) + list(steps)}
+
+
 def _build_filters(state: AgentState) -> RetrievalFilters:
-    filters = RetrievalFilters()
-    if state.get("from_date"):
-        filters.from_date = datetime.fromisoformat(state["from_date"])
-    if state.get("to_date"):
-        filters.to_date = datetime.combine(datetime.fromisoformat(state["to_date"]).date(), time.max)
-    if state.get("section"):
-        filters.sections = [state["section"]]
+    filters = RetrievalFilters.from_iso(
+        state.get("from_date"),
+        state.get("to_date"),
+        sections=[state["section"]] if state.get("section") else None,
+    )
     intent = state.get("intent", "")
     conv = state.get("conversation_state", {})
     if intent == "ARTICLE_QA" and conv.get("active_article_id"):
@@ -141,17 +154,8 @@ def build_agent_graph(session: AsyncSession, router_llm=None, synthesis_llm=None
             "freshness": bool(result.get("freshness")),
             "output_format": result.get("output_format", ""),
             "search_queries": queries[:3],
-            "steps": state.get("steps", []) + ["classify"],
-            "iterations": state.get("iterations", 0) + 1,
+            **_advance(state, "classify"),
         }
-
-    def route_after_classify(state: AgentState) -> str:
-        intent = state.get("intent", "")
-        if intent == "SOURCE_LOOKUP":
-            return "retrieve"
-        if intent in FRESH_INTENTS or state.get("freshness") or intent == "ARTICLE_QA":
-            return "fetch_fresh"
-        return "retrieve"
 
     async def fetch_fresh_node(state: AgentState) -> dict[str, Any]:
         """Freshness path: query the Guardian API first, index unseen articles."""
@@ -185,8 +189,7 @@ def build_agent_graph(session: AsyncSession, router_llm=None, synthesis_llm=None
         return {
             "guardian_found": found,
             "articles_indexed": indexed,
-            "steps": state.get("steps", []) + ["fetch_fresh"],
-            "iterations": state.get("iterations", 0) + 1,
+            **_advance(state, "fetch_fresh"),
         }
 
     async def retrieve_node(state: AgentState) -> dict[str, Any]:
@@ -212,8 +215,7 @@ def build_agent_graph(session: AsyncSession, router_llm=None, synthesis_llm=None
         return {
             "evidence": evidence,
             "sources": sources,
-            "steps": state.get("steps", []) + ["retrieve", "rerank"],
-            "iterations": state.get("iterations", 0) + 1,
+            **_advance(state, "retrieve", "rerank"),
         }
 
     async def synthesize_node(state: AgentState) -> dict[str, Any]:
@@ -228,7 +230,7 @@ def build_agent_graph(session: AsyncSession, router_llm=None, synthesis_llm=None
         response = await llm.ainvoke(
             [SystemMessage(content=SYSTEM_PROMPT), HumanMessage(content=prompt)]
         )
-        answer = response.content if hasattr(response, "content") else str(response)
+        answer = response_text(response)
         # Keep only sources actually cited in the answer
         cited = {int(n) for n in re.findall(r"\[(\d+)\]", answer)}
         sources = state.get("sources", [])
@@ -243,7 +245,7 @@ def build_agent_graph(session: AsyncSession, router_llm=None, synthesis_llm=None
         return {
             "answer": answer,
             "sources": cited_sources,
-            "steps": state.get("steps", []) + ["synthesize"],
+            **_advance(state, "synthesize"),
         }
 
     graph = StateGraph(AgentState)
@@ -276,6 +278,5 @@ async def run_agent(
         "conversation_state": conversation_state or {},
         "conversation_summary": conversation_summary,
         "steps": [],
-        "iterations": 0,
     }
     return await graph.ainvoke(initial, config={"recursion_limit": settings.max_agent_iterations + 4})

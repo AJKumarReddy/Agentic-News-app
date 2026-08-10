@@ -97,3 +97,13 @@ class ConversationRepository:
             .limit(limit)
         )
         return list(result.scalars())
+
+    async def get_recent_messages(self, conversation_id: str, n: int = 8) -> list[Message]:
+        """Last n messages in chronological order, without loading the full history."""
+        result = await self.session.execute(
+            select(Message)
+            .where(Message.conversation_id == conversation_id)
+            .order_by(Message.created_at.desc())
+            .limit(n)
+        )
+        return list(reversed(list(result.scalars())))

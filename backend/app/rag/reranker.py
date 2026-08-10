@@ -7,16 +7,18 @@ Initial retrieval returns 15–20 candidates; the reranker narrows them to the
   - NoopReranker: keeps hybrid ordering (RERANKER=none)
 """
 
-import json
 import logging
 import re
 from abc import ABC, abstractmethod
 
 from app.core.config import get_settings
 from app.core.logging import Timer, log_event
+from app.llm.client import extract_json, response_text
 from app.rag.vector_store import ScoredChunk
 
 logger = logging.getLogger(__name__)
+
+_RANKING_ARRAY_RE = re.compile(r"\[[\d,\s]*\]")
 
 
 class Reranker(ABC):
@@ -59,10 +61,8 @@ class LLMReranker(Reranker):
         )
         prompt = self.PROMPT.format(top_n=top_n, query=query[:1000], passages=passages)
         try:
-            response = await self._get_llm().ainvoke(prompt)
-            content = response.content if hasattr(response, "content") else str(response)
-            match = re.search(r"\[[\d,\s]*\]", content)
-            order = json.loads(match.group(0)) if match else []
+            content = response_text(await self._get_llm().ainvoke(prompt))
+            order = extract_json(content, pattern=_RANKING_ARRAY_RE, default=[])
             picked: list[ScoredChunk] = []
             seen: set[int] = set()
             for number in order:

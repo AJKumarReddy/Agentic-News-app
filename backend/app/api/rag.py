@@ -1,5 +1,3 @@
-from datetime import datetime, time
-
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -33,11 +31,9 @@ class IngestRequest(BaseModel):
 
 @router.post("/retrieve")
 async def retrieve(request: RetrieveRequest, session: AsyncSession = Depends(get_session)):
-    filters = RetrievalFilters(
-        from_date=datetime.fromisoformat(request.from_date) if request.from_date else None,
-        to_date=datetime.combine(datetime.fromisoformat(request.to_date).date(), time.max)
-        if request.to_date
-        else None,
+    filters = RetrievalFilters.from_iso(
+        request.from_date,
+        request.to_date,
         sections=request.sections,
         tags=request.tags,
         article_ids=request.article_ids,
@@ -70,19 +66,11 @@ async def retrieve(request: RetrieveRequest, session: AsyncSession = Depends(get
 @router.post("/ingest")
 async def ingest(request: IngestRequest, session: AsyncSession = Depends(get_session)):
     """Ingest by explicit article IDs and/or a Guardian search query."""
-    articles = []
-    for article_id in request.article_ids:
-        article = await tools.get_guardian_article(article_id)
-        if article:
-            articles.append(article)
-    if request.query:
-        articles.extend(
-            await tools.search_guardian(
-                request.query,
-                from_date=request.from_date,
-                to_date=request.to_date,
-                section=request.section,
-            )
-        )
-    stats = await tools.index_guardian_articles(session, articles)
-    return stats
+    return await tools.fetch_and_index(
+        session,
+        queries=[request.query] if request.query else [],
+        article_ids=request.article_ids,
+        from_date=request.from_date,
+        to_date=request.to_date,
+        section=request.section,
+    )

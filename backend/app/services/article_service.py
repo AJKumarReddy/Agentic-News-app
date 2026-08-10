@@ -1,14 +1,12 @@
 """Article detail + AI 'article intelligence' (summary, key points, entities,
 topics, dates, related articles)."""
 
-import json
 import logging
-import re
 from typing import Any
 
 from app.guardian.client import GuardianAPIError, get_guardian_client
 from app.guardian.models import NormalizedArticle
-from app.llm.client import get_chat_model
+from app.llm.client import extract_json, get_chat_model, response_text
 from app.llm.prompts import ARTICLE_INTELLIGENCE_PROMPT
 from app.services.cache import cache_get, cache_set
 
@@ -54,13 +52,10 @@ async def analyze_article(article: NormalizedArticle) -> dict[str, Any]:
     }
     try:
         response = await get_chat_model(temperature=0, max_tokens=900).ainvoke(prompt)
-        content = response.content if hasattr(response, "content") else str(response)
-        match = re.search(r"\{.*\}", content, re.DOTALL)
-        if match:
-            parsed = json.loads(match.group(0))
-            for field in analysis:
-                if field in parsed:
-                    analysis[field] = parsed[field]
+        parsed = extract_json(response_text(response), default={})
+        for field in analysis:
+            if field in parsed:
+                analysis[field] = parsed[field]
     except Exception:
         logger.warning("Article analysis failed", exc_info=True)
         analysis["summary"] = article.trail_text or "Analysis unavailable."

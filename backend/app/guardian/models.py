@@ -3,12 +3,6 @@ from datetime import datetime, timezone
 from pydantic import BaseModel, Field
 
 
-class GuardianTag(BaseModel):
-    id: str
-    type: str = ""
-    web_title: str = ""
-
-
 class NormalizedArticle(BaseModel):
     """Canonical article structure used across the whole application.
 

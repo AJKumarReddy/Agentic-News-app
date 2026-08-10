@@ -122,13 +122,6 @@ class GuardianClient:
             raise GuardianAPIError(f"Article not found: {article_id}", 404)
         return normalize_article(content)
 
-    async def sections(self) -> list[dict[str, str]]:
-        payload = await self._get("/sections", {})
-        return [
-            {"id": s.get("id", ""), "title": s.get("webTitle", "")}
-            for s in payload.get("results", [])
-        ]
-
     async def ping(self) -> bool:
         try:
             await self._get("/search", {"page-size": 1})

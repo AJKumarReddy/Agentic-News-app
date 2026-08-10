@@ -1,8 +1,11 @@
+import { memo } from 'react';
 import Markdown from './Markdown';
 import SourceList from './SourceList';
 import type { ChatMessage } from '../types';
 
-export default function MessageBubble({ message }: { message: ChatMessage }) {
+// memo: while streaming, only the last bubble's props change — earlier
+// messages must not re-render (and re-parse markdown) per token batch
+function MessageBubble({ message }: { message: ChatMessage }) {
   if (message.role === 'user') {
     return (
       <div className="flex justify-end">
@@ -31,3 +34,5 @@ export default function MessageBubble({ message }: { message: ChatMessage }) {
     </div>
   );
 }
+
+export default memo(MessageBubble);

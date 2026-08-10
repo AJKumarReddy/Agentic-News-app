@@ -17,7 +17,7 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.agents.graph import build_agent_graph, run_agent
+from app.agents.graph import build_agent_graph, route_after_classify, run_agent
 from app.agents.state import default_conversation_state
 from app.core.logging import Timer, log_event
 from app.core.security import sanitize_user_text
@@ -77,7 +77,7 @@ async def _prepare(
     state = conversation.state or default_conversation_state()
     if article_id:
         state["active_article_id"] = article_id
-    history = await repo.get_messages(conversation.id)
+    history = await repo.get_recent_messages(conversation.id, n=8)
     await repo.add_message(conversation, "user", message)
     return repo, conversation, state, _summarize_history(history)
 
@@ -130,7 +130,6 @@ async def chat_stream(
             "conversation_state": conv_state,
             "conversation_summary": summary,
             "steps": [],
-            "iterations": 0,
         }
 
         final_state: dict[str, Any] = dict(initial)
@@ -147,19 +146,12 @@ async def chat_stream(
                 for node_name, update in payload.items():
                     if update:
                         final_state.update(update)
-                    next_stage = {
-                        "classify": "fetch_fresh" if node_name == "classify" else None,
-                        "fetch_fresh": "retrieve",
-                        "retrieve": "synthesize",
-                    }.get(node_name)
+                    # announce the next stage; classification defers to the graph's own routing
                     if node_name == "classify":
-                        # announce the actual next stage based on routing
-                        update = update or {}
-                        intent = update.get("intent", "")
-                        skip_fetch = intent in ("SOURCE_LOOKUP", "FOLLOW_UP", "FACT_LOOKUP") and not update.get("freshness")
-                        stage = "retrieve" if skip_fetch else "fetch_fresh"
-                        yield _sse("status", {"stage": stage, "detail": _STAGE_LABELS.get(stage, "")})
-                    elif next_stage:
+                        next_stage = route_after_classify(update or {})
+                    else:
+                        next_stage = {"fetch_fresh": "retrieve", "retrieve": "synthesize"}.get(node_name)
+                    if next_stage:
                         yield _sse("status", {"stage": next_stage, "detail": _STAGE_LABELS.get(next_stage, "")})
 
         answer = final_state.get("answer", "")

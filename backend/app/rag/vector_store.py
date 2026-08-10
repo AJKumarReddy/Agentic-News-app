@@ -7,11 +7,12 @@ is small enough to reimplement against Qdrant later if scale demands it.
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, time
 from typing import Sequence
 
 from sqlalchemy import Float, bindparam, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import defer
 
 from app.database.models import Chunk
 
@@ -24,6 +25,27 @@ class RetrievalFilters:
     tags: list[str] = field(default_factory=list)
     article_ids: list[str] = field(default_factory=list)
     authors: list[str] = field(default_factory=list)
+
+    @classmethod
+    def from_iso(
+        cls,
+        from_date: str | None = None,
+        to_date: str | None = None,
+        *,
+        sections: list[str] | None = None,
+        tags: list[str] | None = None,
+        article_ids: list[str] | None = None,
+    ) -> "RetrievalFilters":
+        """Build filters from ISO date strings; to_date is inclusive (end of day)."""
+        return cls(
+            from_date=datetime.fromisoformat(from_date) if from_date else None,
+            to_date=datetime.combine(datetime.fromisoformat(to_date).date(), time.max)
+            if to_date
+            else None,
+            sections=sections or [],
+            tags=tags or [],
+            article_ids=article_ids or [],
+        )
 
 
 @dataclass
@@ -60,7 +82,8 @@ async def vector_search(
     filters: RetrievalFilters | None = None,
 ) -> list[ScoredChunk]:
     distance = Chunk.embedding.cosine_distance(list(query_embedding)).label("distance")
-    stmt = select(Chunk, distance).order_by(distance.asc()).limit(top_k)
+    # embeddings are ranked in SQL; never hydrate the 1536-dim vectors
+    stmt = select(Chunk, distance).options(defer(Chunk.embedding)).order_by(distance.asc()).limit(top_k)
     stmt = _apply_filters(stmt, filters)
     result = await session.execute(stmt)
     return [ScoredChunk(chunk=row[0], score=1.0 - float(row[1])) for row in result.all()]
@@ -79,6 +102,7 @@ async def keyword_search(
     rank = func.ts_rank_cd(tsvector, tsquery).cast(Float).label("rank")
     stmt = (
         select(Chunk, rank)
+        .options(defer(Chunk.embedding))
         .where(tsvector.op("@@")(tsquery))
         .order_by(text("rank DESC"))
         .limit(top_k)

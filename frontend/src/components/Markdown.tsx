@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { Source } from '../types';
@@ -7,7 +8,7 @@ import type { Source } from '../types';
  * clickable badges linking to the numbered Guardian source.
  */
 export default function Markdown({ content, sources }: { content: string; sources: Source[] }) {
-  const bySourceNumber = new Map(sources.map((s) => [s.n, s]));
+  const bySourceNumber = useMemo(() => new Map(sources.map((s) => [s.n, s])), [sources]);
 
   const renderWithCitations = (text: string) => {
     const parts = text.split(/(\[\d+\])/g);

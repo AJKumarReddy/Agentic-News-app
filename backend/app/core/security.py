@@ -47,9 +47,11 @@ def client_ip(request: Request) -> str:
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next) -> Response:
         response = await call_next(request)
+        is_html = response.headers.get("content-type", "").startswith("text/html")
         for key, value in _SECURE_HEADERS.items():
-            # the dev-only Swagger UI needs scripts/styles, so skip CSP there
-            if key == "Content-Security-Policy" and request.url.path.startswith("/docs"):
+            # the deny-all CSP is for data responses; HTML pages (dev-only
+            # Swagger UI) need their scripts/styles
+            if key == "Content-Security-Policy" and is_html:
                 continue
             response.headers.setdefault(key, value)
         return response
@@ -99,13 +101,22 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
 
 
 class RateLimiter:
+    SWEEP_EVERY = 1024  # drop idle keys periodically so the dict can't grow forever
+
     def __init__(self, limit_per_minute: int):
         self.limit = limit_per_minute
         self.window = 60.0
         self._hits: dict[str, deque[float]] = defaultdict(deque)
+        self._calls = 0
 
     def allow(self, key: str) -> bool:
         now = time.monotonic()
+        self._calls += 1
+        if self._calls % self.SWEEP_EVERY == 0:
+            cutoff = now - self.window
+            self._hits = defaultdict(
+                deque, {k: v for k, v in self._hits.items() if v and v[-1] > cutoff}
+            )
         hits = self._hits[key]
         while hits and now - hits[0] > self.window:
             hits.popleft()
@@ -127,9 +138,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next) -> Response:
         if request.url.path in EXEMPT_PATHS or request.method == "OPTIONS":
             return await call_next(request)
-        ip = client_ip(request)
+        # separate limiter instances already namespace the buckets
         limiter = self.chat_limiter if request.url.path == "/api/chat" else self.limiter
-        if not limiter.allow(f"{request.url.path == '/api/chat'}:{ip}"):
+        if not limiter.allow(client_ip(request)):
             return JSONResponse(
                 status_code=429,
                 content={"detail": "Rate limit exceeded. Please slow down."},

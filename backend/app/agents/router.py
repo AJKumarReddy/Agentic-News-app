@@ -13,6 +13,7 @@ from typing import Any
 from app.agents.dateparse import detect_freshness, parse_date_range
 from app.agents.state import INTENTS, merge_with_previous
 from app.core.logging import log_event
+from app.llm.client import extract_json, response_text
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +24,6 @@ Classify the user message and extract slots. Respond with JSON only:
   "intent": "one of {intents}",
   "entities": ["named entities such as companies, people, countries"],
   "topics": ["broad topics such as artificial intelligence, climate"],
-  "date_expression": "verbatim date phrase from the message or empty string",
   "from_date": "YYYY-MM-DD or empty",
   "to_date": "YYYY-MM-DD or empty",
   "section": "guardian section id like technology, politics, business, environment, world — or empty",
@@ -67,7 +67,6 @@ def heuristic_classify(message: str) -> dict[str, Any]:
         "intent": intent,
         "entities": entities[:4],
         "topics": [],
-        "date_expression": "",
         "from_date": "",
         "to_date": "",
         "section": "",
@@ -102,11 +101,7 @@ async def classify(
             prompt = ROUTER_PROMPT.format(
                 intents=", ".join(INTENTS), context=context, today=today, message=message[:2000]
             )
-            response = await llm.ainvoke(prompt)
-            content = response.content if hasattr(response, "content") else str(response)
-            match = re.search(r"\{.*\}", content, re.DOTALL)
-            if match:
-                raw = json.loads(match.group(0))
+            raw = extract_json(response_text(await llm.ainvoke(prompt)))
         except Exception:
             logger.warning("LLM router failed; using heuristic classifier", exc_info=True)
 
@@ -120,8 +115,6 @@ async def classify(
 
     raw["freshness"] = detect_freshness(message)
     merged = merge_with_previous(raw, previous_state)
-    if merged.get("resolved_intent"):
-        merged["intent"] = merged["resolved_intent"]
 
     log_event(
         logger,

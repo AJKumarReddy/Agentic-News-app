@@ -1,6 +1,7 @@
 """Hybrid retrieval: vector similarity + keyword matching fused with
 Reciprocal Rank Fusion, plus metadata filtering and recency weighting."""
 
+import asyncio
 import logging
 import math
 from datetime import datetime, timezone
@@ -46,9 +47,14 @@ async def hybrid_retrieve(
     top_k = top_k or settings.rag_initial_top_k
 
     with Timer() as timer:
-        query_embedding = await get_embedding_provider().embed_query(query)
+        # The OpenAI embedding call and the keyword SQL query are independent;
+        # only vector_search needs the embedding. (Both DB queries must stay
+        # sequential — they share one AsyncSession.)
+        query_embedding, keyword_results = await asyncio.gather(
+            get_embedding_provider().embed_query(query),
+            keyword_search(session, query, top_k=top_k, filters=filters),
+        )
         vector_results = await vector_search(session, query_embedding, top_k=top_k, filters=filters)
-        keyword_results = await keyword_search(session, query, top_k=top_k, filters=filters)
 
         fused = rrf_merge([vector_results, keyword_results])
         by_id = {s.chunk.id: s.chunk for s in vector_results + keyword_results}
