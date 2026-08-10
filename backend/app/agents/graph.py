@@ -11,6 +11,7 @@ always grounded in the evidence collected by earlier nodes.
 
 import logging
 import re
+from datetime import date, timedelta
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -18,6 +19,7 @@ from langgraph.graph import END, StateGraph
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents import tools
+from app.agents.dateparse import clean_search_query
 from app.agents.router import classify
 from app.agents.state import AgentState
 from app.core.config import get_settings
@@ -41,6 +43,8 @@ FRESH_INTENTS = {
 }
 
 MAX_EVIDENCE_CHARS = 14000  # hard cap on retrieval context sent to the LLM
+SEARCH_LOOKBACK_DAYS = 3  # fetch wider than we filter, so narrow windows aren't empty
+RELAX_WINDOW_DAYS = 14  # first fallback window when a strict date filter finds nothing
 
 
 def route_after_classify(state: AgentState) -> str:
@@ -167,14 +171,22 @@ def build_agent_graph(session: AsyncSession, router_llm=None, synthesis_llm=None
         queries = list(state.get("search_queries", []))
         if intent == "COMPARISON" and state.get("entities"):
             queries = state["entities"][:3]
+        # "today"/"latest" belong in the date filter, not the keyword query
+        queries = list(dict.fromkeys(clean_search_query(q) for q in queries if q.strip()))
         order_by = "newest" if state.get("freshness") or intent == "LATEST_NEWS" else "relevance"
         active_id = conv.get("active_article_id")
+
+        # A same-day window can be nearly empty early in the publishing day, so
+        # fetch a wider slice than we filter on — retrieval still ranks by recency.
+        search_from = state.get("from_date")
+        if search_from:
+            search_from = (date.fromisoformat(search_from) - timedelta(days=SEARCH_LOOKBACK_DAYS)).isoformat()
 
         stats = await tools.fetch_and_index(
             session,
             queries,
             article_ids=[active_id] if active_id else None,
-            from_date=state.get("from_date"),
+            from_date=search_from,
             to_date=state.get("to_date"),
             section=state.get("section"),
             order_by=order_by,
@@ -204,10 +216,36 @@ def build_agent_graph(session: AsyncSession, router_llm=None, synthesis_llm=None
                 )
             }
 
+        # A narrow window (e.g. "today" early in the publishing day) can match
+        # nothing even when relevant coverage exists. Widen rather than
+        # reporting no evidence — the answer states which period it covers.
+        relaxed_note = ""
+        if not any(groups.values()) and (filters.from_date or filters.sections):
+            for window, note in (
+                (RELAX_WINDOW_DAYS, f"the last {RELAX_WINDOW_DAYS} days"),
+                (None, "all indexed Guardian reporting"),
+            ):
+                wider = RetrievalFilters(article_ids=filters.article_ids)
+                if window is not None and filters.from_date:
+                    wider.from_date = filters.from_date - timedelta(days=window)
+                fallback = await tools.retrieve_rag(
+                    session, state["query"], filters=wider, freshness=True, rerank=True
+                )
+                if fallback:
+                    groups = {"default": fallback}
+                    relaxed_note = (
+                        "No Guardian articles were found for the exact period requested; "
+                        f"the evidence below is drawn from {note} instead. Say so in your answer "
+                        "and give the date of each item."
+                    )
+                    break
+
         evidence, sources = _chunks_to_evidence(groups)
+        log_event(logger, "retrieve_node", intent=intent, evidence=len(evidence), relaxed=bool(relaxed_note))
         return {
             "evidence": evidence,
             "sources": sources,
+            "relaxed_note": relaxed_note,
             **_advance(state, "retrieve", "rerank"),
         }
 
@@ -218,6 +256,7 @@ def build_agent_graph(session: AsyncSession, router_llm=None, synthesis_llm=None
             intent=state.get("intent", "TOPIC_SUMMARY"),
             conversation_summary=state.get("conversation_summary", ""),
             output_format=state.get("output_format", ""),
+            coverage_note=state.get("relaxed_note", ""),
         )
         llm = synthesis_llm or get_chat_model(temperature=0.2, streaming=True, max_tokens=1800)
         response = await llm.ainvoke(
