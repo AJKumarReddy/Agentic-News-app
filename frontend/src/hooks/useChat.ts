@@ -71,6 +71,9 @@ export function useChat() {
                 flushTokens();
                 updateAssistant((m) => ({ ...m, sources: event.sources }));
                 break;
+              case 'notice':
+                updateAssistant((m) => ({ ...m, notice: event.detail }));
+                break;
               case 'error':
                 flushTokens();
                 updateAssistant((m) => ({

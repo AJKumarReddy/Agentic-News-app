@@ -63,6 +63,66 @@ async def test_search_parses_results_and_domains():
     assert results[0].url == "https://www.reuters.com/business/merger"
 
 
+async def test_quality_gate_drops_low_signal_domains_and_scores():
+    payload = {
+        "results": [
+            {"title": "Video", "url": "https://www.youtube.com/watch?v=1", "content": "clip", "score": 0.9},
+            {"title": "Weak", "url": "https://example.com/a", "content": "x", "score": 0.05},
+            {"title": "Empty", "url": "https://example.com/b", "content": "", "score": 0.9},
+            {"title": "Good", "url": "https://reuters.com/x", "content": "real reporting", "score": 0.8},
+        ]
+    }
+    results = await make_client(lambda r: httpx.Response(200, json=payload)).search("q")
+    assert [r.source for r in results] == ["reuters.com"]
+
+
+async def test_explicitly_requested_domain_survives_the_filter():
+    from app.websearch.client import requested_domains
+
+    payload = {
+        "results": [
+            {"title": "Clip", "url": "https://www.youtube.com/watch?v=1", "content": "video", "score": 0.9},
+            {"title": "News", "url": "https://reuters.com/x", "content": "story", "score": 0.8},
+        ]
+    }
+    client = make_client(lambda r: httpx.Response(200, json=payload))
+    assert "youtube.com" in requested_domains("search youtube for related news")
+    assert requested_domains("latest AI news") == []
+
+    blocked = await client.search("q")
+    assert [r.source for r in blocked] == ["reuters.com"]
+
+    allowed = await client.search("q2", allow_domains=["youtube.com"])
+    assert "youtube.com" in [r.source for r in allowed]
+
+
+async def test_quality_gate_drops_stale_pages_for_news_queries():
+    payload = {
+        "results": [
+            {
+                "title": "Old doc",
+                "url": "https://developers.google.com/search",
+                "content": "docs",
+                "score": 0.9,
+                "published_date": "2012-05-20",
+            },
+            {
+                "title": "Fresh",
+                "url": "https://apnews.com/new",
+                "content": "story",
+                "score": 0.9,
+                "published_date": "2026-08-09",
+            },
+        ]
+    }
+    client = make_client(lambda r: httpx.Response(200, json=payload))
+    news = await client.search("q", topic="news")
+    assert [r.source for r in news] == ["apnews.com"]
+    # reference lookups may legitimately surface older pages
+    general = await client.search("q2", topic="general")
+    assert len(general) == 2
+
+
 async def test_api_error_returns_empty_not_raises():
     client = make_client(lambda r: httpx.Response(500, text="boom"))
     assert await client.search("x") == []

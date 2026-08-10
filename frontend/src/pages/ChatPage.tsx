@@ -9,7 +9,7 @@ const SUGGESTED_QUESTIONS = [
   'Latest AI developments',
   'US politics this week',
   'Climate stories today',
-  'Compare Guardian coverage of OpenAI and Anthropic',
+  'Compare coverage of OpenAI and Anthropic',
 ];
 
 export default function ChatPage({ onConversationChange }: { onConversationChange?: () => void }) {
@@ -72,18 +72,16 @@ export default function ChatPage({ onConversationChange }: { onConversationChang
         <div className="mx-auto max-w-3xl px-4 py-6">
           {empty ? (
             <div className="mt-16 text-center">
-              <h1 className="font-serif text-3xl font-bold text-guardian-900">
-                Guardian AI News Assistant
-              </h1>
+              <h1 className="font-serif text-3xl font-bold text-brand-900">News AI</h1>
               <p className="mt-2 text-slate-600">
-                Research Guardian journalism using AI — grounded answers with citations.
+                Research the news with AI — grounded answers, every claim cited.
               </p>
               <div className="mx-auto mt-8 grid max-w-xl grid-cols-1 gap-3 sm:grid-cols-2">
                 {SUGGESTED_QUESTIONS.map((question) => (
                   <button
                     key={question}
                     onClick={() => send(question)}
-                    className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-left text-sm text-slate-700 shadow-sm transition-colors hover:border-guardian-500 hover:bg-guardian-50"
+                    className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-left text-sm text-slate-700 shadow-sm transition-colors hover:border-brand-500 hover:bg-brand-50"
                   >
                     {question}
                   </button>
@@ -104,8 +102,8 @@ export default function ChatPage({ onConversationChange }: { onConversationChang
         <div className="mx-auto max-w-3xl px-4 py-4">
           <ChatInput onSend={send} busy={busy} onStop={stop} />
           <p className="mt-2 text-center text-[11px] text-slate-400">
-            Answers are grounded in Guardian reporting with citations. Verify important facts via the
-            linked articles.
+            Answers cite their sources — Guardian reporting first, the web when needed. Verify
+            important facts via the linked articles.
           </p>
         </div>
       </div>

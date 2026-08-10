@@ -55,7 +55,7 @@ export default function ArticlePage() {
       <div className="mx-auto max-w-4xl px-4 py-8">
         <div className="flex items-center gap-2 text-xs text-slate-500">
           {article.section && (
-            <span className="rounded bg-guardian-50 px-2 py-0.5 font-semibold text-guardian-700">
+            <span className="rounded bg-brand-50 px-2 py-0.5 font-semibold text-brand-700">
               {article.section}
             </span>
           )}
@@ -87,7 +87,7 @@ export default function ArticlePage() {
                 },
               })
             }
-            className="rounded-lg bg-guardian-600 px-4 py-2 text-sm font-semibold text-white hover:bg-guardian-700"
+            className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700"
           >
             Ask AI about this article
           </button>
@@ -131,7 +131,7 @@ export default function ArticlePage() {
                 {analysis.topics.map((topic, i) => (
                   <span
                     key={i}
-                    className="rounded-full bg-guardian-50 px-2.5 py-1 text-xs text-guardian-700"
+                    className="rounded-full bg-brand-50 px-2.5 py-1 text-xs text-brand-700"
                   >
                     {topic}
                   </span>
@@ -156,7 +156,7 @@ export default function ArticlePage() {
 
         {related.length > 0 && (
           <section className="mt-8 pb-10">
-            <h2 className="font-serif text-xl font-bold text-guardian-900">Related Guardian articles</h2>
+            <h2 className="font-serif text-xl font-bold text-brand-900">Related Guardian articles</h2>
             <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {related.map((r) => (
                 <ArticleCard key={r.article_id} article={r} />

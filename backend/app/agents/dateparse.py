@@ -1,8 +1,8 @@
 """Deterministic natural-language date range parsing.
 
-The LLM router may also propose ISO dates, but for the well-known phrases
-below this parser is authoritative — deterministic behavior beats model
-variance for date math.
+The understanding step may also propose ISO dates, but for the well-known
+phrases below this parser is authoritative — deterministic behavior beats
+model variance for date math.
 """
 
 import re
@@ -79,23 +79,3 @@ def parse_date_range(text: str, today: date | None = None) -> tuple[str, str] | 
 def detect_freshness(text: str) -> bool:
     lowered = text.lower()
     return any(term in lowered for term in FRESHNESS_TERMS)
-
-
-_QUERY_NOISE = re.compile(
-    r"\b(today|yesterday|latest|recent|recently|current|currently|breaking|"
-    r"this week|last week|this month|last month|this year|news|stories|"
-    r"guardian|the guardian|what|about|tell me)\b",
-    re.IGNORECASE,
-)
-
-
-def clean_search_query(query: str) -> str:
-    """Strip freshness/meta words before sending a query to the Guardian API.
-
-    Date intent is already expressed as from-date/to-date filters, so leaving
-    "today" or "latest" in the keyword query only narrows the match and
-    surfaces articles that happen to contain the word.
-    """
-    cleaned = _QUERY_NOISE.sub(" ", query)
-    cleaned = re.sub(r"\s+", " ", cleaned).strip(" ,.?!-")
-    return cleaned or query.strip()

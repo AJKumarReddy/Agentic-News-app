@@ -44,6 +44,8 @@ export class SSEParser {
         return { type: 'token', delta: String(data.delta ?? '') };
       case 'sources':
         return { type: 'sources', sources: (data.sources as Source[]) ?? [] };
+      case 'notice':
+        return { type: 'notice', detail: String(data.detail ?? '') };
       case 'done':
         return { type: 'done' };
       case 'error':

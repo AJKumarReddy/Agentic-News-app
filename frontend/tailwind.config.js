@@ -4,7 +4,7 @@ export default {
   theme: {
     extend: {
       colors: {
-        guardian: {
+        brand: {
           50: '#eef4fb',
           100: '#d8e6f6',
           500: '#0f6bb5',

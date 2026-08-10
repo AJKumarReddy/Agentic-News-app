@@ -39,6 +39,9 @@ export interface ChatMessage {
   content: string;
   sources: Source[];
   status?: string; // transient pipeline status while streaming
+  /** Retrieval metadata (e.g. "showing the last 14 days") shown as a badge,
+   *  deliberately kept out of the answer prose. */
+  notice?: string;
   streaming?: boolean;
 }
 
@@ -68,5 +71,6 @@ export type ChatStreamEvent =
   | { type: 'status'; stage: string; detail: string }
   | { type: 'token'; delta: string }
   | { type: 'sources'; sources: Source[] }
+  | { type: 'notice'; detail: string }
   | { type: 'done' }
   | { type: 'error'; detail: string };
