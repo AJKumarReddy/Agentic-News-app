@@ -6,6 +6,7 @@ import type {
   SearchResponse,
   Source,
 } from '../types';
+import { getClientId } from '../utils/clientId';
 import { SSEParser } from '../utils/sse';
 
 export const API_BASE: string = import.meta.env.VITE_API_BASE_URL || '/api';
@@ -14,10 +15,15 @@ export const API_BASE: string = import.meta.env.VITE_API_BASE_URL || '/api';
 // Note: anything bundled into a public SPA is visible to its users.
 const API_KEY: string = import.meta.env.VITE_API_KEY || '';
 
+const COMMON_HEADERS: Record<string, string> = {
+  'X-Client-Id': getClientId(),
+  ...(API_KEY ? { 'X-API-Key': API_KEY } : {}),
+};
+
 const http = axios.create({
   baseURL: API_BASE,
   timeout: 30000,
-  headers: API_KEY ? { 'X-API-Key': API_KEY } : {},
+  headers: COMMON_HEADERS,
 });
 
 export interface SearchParams {
@@ -73,10 +79,7 @@ export async function streamChat(
 ): Promise<void> {
   const response = await fetch(`${API_BASE}/chat`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(API_KEY ? { 'X-API-Key': API_KEY } : {}),
-    },
+    headers: { 'Content-Type': 'application/json', ...COMMON_HEADERS },
     signal: options.signal,
     body: JSON.stringify({
       message,
