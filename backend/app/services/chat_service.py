@@ -27,8 +27,10 @@ logger = logging.getLogger(__name__)
 
 _STAGE_LABELS = {
     "classify": "Understanding your question…",
+    "decide_source": "Deciding where to look…",
     "fetch_fresh": "Searching The Guardian for current reporting…",
     "retrieve": "Retrieving and ranking relevant Guardian coverage…",
+    "web_search": "Checking additional sources on the web…",
     "synthesize": "Writing a grounded answer…",
 }
 
@@ -152,9 +154,19 @@ async def chat_stream(
                         final_state.update(update)
                     # announce the next stage; classification defers to the graph's own routing
                     if node_name == "classify":
-                        next_stage = route_after_classify(update or {})
+                        next_stage = "decide_source"
+                    elif node_name == "decide_source":
+                        next_stage = (
+                            "web_search"
+                            if (update or {}).get("evidence_plan") == "WEB"
+                            else route_after_classify(final_state)
+                        )
                     else:
-                        next_stage = {"fetch_fresh": "retrieve", "retrieve": "synthesize"}.get(node_name)
+                        next_stage = {
+                            "fetch_fresh": "retrieve",
+                            "retrieve": "synthesize",
+                            "web_search": "synthesize",
+                        }.get(node_name)
                     if next_stage:
                         yield _sse("status", {"stage": next_stage, "detail": _STAGE_LABELS.get(next_stage, "")})
 

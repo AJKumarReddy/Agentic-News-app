@@ -40,6 +40,9 @@ class AgentState(TypedDict, total=False):
     evidence: list[dict[str, Any]]  # reranked chunks as dicts
     sources: list[dict[str, Any]]  # deduplicated citation list
     relaxed_note: str  # set when date/section filters had to be widened
+    evidence_plan: str  # decision agent: GUARDIAN | WEB | BOTH
+    web_query: str
+    web_used: bool  # web search supplied part of the evidence
     answer: str
     steps: list[str]
 

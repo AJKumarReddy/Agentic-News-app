@@ -22,6 +22,10 @@ export interface SearchResponse {
 
 export interface Source {
   n: number;
+  /** "guardian" for Guardian articles, "web" for supplementary web results */
+  type?: 'guardian' | 'web';
+  /** Display name: "The Guardian" or the web source's domain */
+  source?: string;
   article_id: string;
   headline: string;
   url: string;

@@ -12,6 +12,13 @@ class Settings(BaseSettings):
     guardian_api_key: str = ""
     guardian_page_size: int = 20
 
+    # Tavily web search — supplementary sources when Guardian evidence is thin.
+    # Empty key disables web search entirely (Guardian-only mode).
+    tavily_api_key: str = ""
+    web_search_max_results: int = 5
+    # Guardian evidence at or below this count triggers a web-search top-up
+    web_search_threshold: int = 2
+
     openai_api_key: str = ""
     chat_model: str = "gpt-4o"
     embedding_model: str = "text-embedding-3-small"

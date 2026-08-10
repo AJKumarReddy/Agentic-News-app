@@ -17,8 +17,26 @@ from app.rag.reranker import rerank_chunks
 from app.rag.retrieval import hybrid_retrieve
 from app.rag.vector_store import RetrievalFilters, ScoredChunk
 from app.services.search_service import search_news
+from app.websearch.client import WebResult, get_web_client
 
 logger = logging.getLogger(__name__)
+
+
+async def search_web(
+    query: str,
+    max_results: int | None = None,
+    days: int | None = None,
+) -> list[WebResult]:
+    """Supplementary web search (Tavily). Guardian domains are excluded so web
+    results never duplicate or masquerade as Guardian reporting.
+    Returns [] when no TAVILY_API_KEY is configured."""
+    settings = get_settings()
+    return await get_web_client().search(
+        query,
+        max_results=max_results or settings.web_search_max_results,
+        days=days,
+        exclude_domains=["theguardian.com"],
+    )
 
 
 async def search_guardian(

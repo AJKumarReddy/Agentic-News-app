@@ -37,7 +37,8 @@ flowchart TB
 | Decision | Choice | Why |
 |---|---|---|
 | Vector DB | **PostgreSQL + pgvector** | One database serves relational data *and* vectors — simplest, cheapest, transactional on a single EC2 instance. The `vector_store.py` interface is small enough to swap for Qdrant later if scale demands it. |
-| Agent | **LangGraph controlled graph** | Deterministic route: classify → (fetch fresh) → retrieve → rerank → synthesize. Bounded, debuggable, no runaway autonomy. |
+| Agent | **LangGraph controlled graph** | Deterministic route: classify → decide source → (fetch fresh) → retrieve → rerank → (web search) → synthesize. Bounded, debuggable, no runaway autonomy. |
+| Web fallback | **Decision agent + Tavily** | A decision node picks `GUARDIAN`, `WEB`, or `BOTH` before fetching. Web results are supplementary, excluded from Guardian domains, and cited separately so they can never be mistaken for Guardian journalism. Disabled entirely when `TAVILY_API_KEY` is unset. |
 | Freshness | Guardian-API-first for "latest/today/this week" queries | A "latest news" question is answered from *current* Guardian results (indexed on the fly), never from stale vectors with high semantic scores. |
 | Dedup | Guardian article ID + SHA-256 content hash | An article is embedded once; re-embedding happens only if content or the embedding model changed. |
 | Streaming | Server-Sent Events | Pipeline status events + token streaming into the React UI. |
@@ -103,6 +104,20 @@ cd backend && python evaluation/run_eval.py --base-url http://localhost:8000
 
 Checks citation presence, real `theguardian.com` URLs, honest refusals on unsupported questions (anti-hallucination), intent routing, and follow-up context retention.
 
+## Evidence sourcing: Guardian first, web when needed
+
+A **decision agent** runs right after intent classification and picks where evidence comes from:
+
+| Plan | When | Path |
+|---|---|---|
+| `GUARDIAN` | News and current events — the default | `fetch_fresh → retrieve → rerank` |
+| `WEB` | Not news at all (how-to, definitions, docs), or the user explicitly asked to search the web | `web_search` only |
+| `BOTH` | Needs Guardian reporting plus outside context or corroboration | Guardian retrieval, then `web_search` |
+
+Guardian evidence is also topped up with web results automatically when retrieval returns at or below `WEB_SEARCH_THRESHOLD` sources, so a thin Guardian result set doesn't produce a dead-end answer.
+
+**Citation integrity is enforced end to end.** Web results exclude `theguardian.com`, carry `type: "web"` plus their real domain, continue the same citation numbering, and are presented to the model under an explicit `NON-GUARDIAN WEB SOURCES` header with instructions to name the site and never attribute it to The Guardian. The UI renders them in amber with a `Web · domain` label, distinct from blue Guardian citations. With no `TAVILY_API_KEY` set, the decision agent always returns `GUARDIAN` and no web request is ever made.
+
 ## How a question flows
 
 > "What are the biggest AI developments reported by The Guardian over the last seven days?"
@@ -122,6 +137,8 @@ See [.env.example](.env.example). Highlights:
 | Variable | Purpose |
 |---|---|
 | `GUARDIAN_API_KEY` / `OPENAI_API_KEY` | server-side only, never exposed to React |
+| `TAVILY_API_KEY` | optional web search; empty = Guardian-only mode |
+| `WEB_SEARCH_THRESHOLD` / `WEB_SEARCH_MAX_RESULTS` | when to top up with web sources, and how many |
 | `CHAT_MODEL`, `EMBEDDING_MODEL`, `EMBEDDING_DIMENSIONS` | model selection (modular providers) |
 | `DATABASE_URL`, `REDIS_URL` | infrastructure |
 | `FRONTEND_URL`, `EXTRA_CORS_ORIGINS` | CORS allowlist (never `*` in production) |
