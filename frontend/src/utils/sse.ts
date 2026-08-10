@@ -1,4 +1,4 @@
-import type { ChatStreamEvent, Source } from '../types';
+import type { ChatRoute, ChatStreamEvent, Source } from '../types';
 
 /**
  * Incremental parser for text/event-stream bodies.
@@ -46,6 +46,15 @@ export class SSEParser {
         return { type: 'sources', sources: (data.sources as Source[]) ?? [] };
       case 'notice':
         return { type: 'notice', detail: String(data.detail ?? '') };
+      case 'route':
+        return {
+          type: 'route',
+          decision: {
+            route: (data.route as ChatRoute) ?? 'NEWS',
+            intent: String(data.intent ?? ''),
+            standalone_question: String(data.standalone_question ?? ''),
+          },
+        };
       case 'done':
         return { type: 'done' };
       case 'error':

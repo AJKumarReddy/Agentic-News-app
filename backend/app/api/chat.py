@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.repositories import ConversationRepository
 from app.database.session import get_session
-from app.services.chat_service import chat_once, chat_stream
+from app.services.chat_service import chat_once, chat_stream, detect_route
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +24,24 @@ class ChatRequest(BaseModel):
     conversation_id: str | None = Field(default=None, max_length=36)
     article_id: str | None = Field(default=None, max_length=512)
     stream: bool = True
+
+
+class IntentRequest(BaseModel):
+    message: str = Field(min_length=1, max_length=4000)
+    conversation_id: str | None = Field(default=None, max_length=36)
+    article_id: str | None = Field(default=None, max_length=512)
+
+
+@router.post("/intent")
+async def detect_intent(
+    request: IntentRequest,
+    session: AsyncSession = Depends(get_session),
+    client_id: str = Depends(client_id_header),
+):
+    """Run only the routing agent and return its decision — no search, no
+    answer. Useful for checking why a question went to the web vs the
+    Guardian, and for testing routing changes without spending a chat turn."""
+    return await detect_route(session, request.message, request.conversation_id, request.article_id, client_id)
 
 
 @router.post("/chat")

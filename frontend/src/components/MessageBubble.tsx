@@ -1,5 +1,6 @@
 import { memo } from 'react';
 import Markdown from './Markdown';
+import RouteBadge from './RouteBadge';
 import SourceList from './SourceList';
 import type { ChatMessage } from '../types';
 
@@ -25,6 +26,7 @@ function MessageBubble({ message }: { message: ChatMessage }) {
             {message.status}
           </div>
         )}
+        {message.routing && !message.streaming && <RouteBadge routing={message.routing} />}
         {message.notice && !message.streaming && (
           <div className="mb-3 flex items-start gap-1.5 rounded-lg bg-amber-50 px-2.5 py-1.5 text-xs text-amber-800">
             <span aria-hidden="true">ⓘ</span>

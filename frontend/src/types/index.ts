@@ -34,10 +34,20 @@ export interface Source {
   author: string;
 }
 
+export type ChatRoute = 'ARTICLE' | 'NEWS' | 'WEB' | 'BOTH';
+
+export interface RouteDecision {
+  route: ChatRoute;
+  intent: string;
+  /** The message rewritten as a self-contained question before searching */
+  standalone_question: string;
+}
+
 export interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
   sources: Source[];
+  routing?: RouteDecision;
   status?: string; // transient pipeline status while streaming
   /** Retrieval metadata (e.g. "showing the last 14 days") shown as a badge,
    *  deliberately kept out of the answer prose. */
@@ -72,5 +82,6 @@ export type ChatStreamEvent =
   | { type: 'token'; delta: string }
   | { type: 'sources'; sources: Source[] }
   | { type: 'notice'; detail: string }
+  | { type: 'route'; decision: RouteDecision }
   | { type: 'done' }
   | { type: 'error'; detail: string };

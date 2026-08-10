@@ -4,6 +4,8 @@ SSE event types sent to the frontend:
   state    {conversation_id}       — ids for follow-up requests
   status   {stage, detail}         — pipeline progress
   token    {delta}                 — incremental answer text
+  route    {route, intent, standalone_question}
+                                   — the routing agent's decision
   sources  {sources: [...]}        — numbered citations
   notice   {detail}                — retrieval metadata (e.g. widened window),
                                      shown as a UI badge, never as answer prose
@@ -86,6 +88,57 @@ async def _prepare(
     return repo, conversation, state, history
 
 
+async def detect_route(
+    session: AsyncSession,
+    message: str,
+    conversation_id: str | None = None,
+    article_id: str | None = None,
+    client_id: str = "",
+) -> dict[str, Any]:
+    """Routing decision only — what the agent understood and where it would
+    look. Runs no search and writes nothing to the conversation."""
+    from app.agents.understand import understand
+    from app.core.config import get_settings
+    from app.llm.client import get_chat_model
+
+    message = sanitize_user_text(message)
+    repo = ConversationRepository(session)
+    conversation = await repo.get(conversation_id, user_id=client_id) if conversation_id else None
+    history: list[dict[str, Any]] = []
+    active_article = article_id or ""
+    if conversation is not None:
+        history = [
+            {"role": m.role, "content": m.content}
+            for m in await repo.get_recent_messages(conversation.id, n=6)
+        ]
+        active_article = active_article or (conversation.state or {}).get("active_article_id", "")
+
+    settings = get_settings()
+    llm = get_chat_model(temperature=0, max_tokens=600) if settings.openai_api_key else None
+    result = await understand(
+        message,
+        history=history,
+        active_article=active_article,
+        llm=llm,
+        web_available=bool(settings.tavily_api_key),
+    )
+    return {
+        "message": message,
+        "standalone_question": result.standalone_question,
+        "route": result.mode,
+        "intent": result.intent,
+        "entities": result.entities,
+        "topics": result.topics,
+        "date_range": {"from": result.from_date, "to": result.to_date},
+        "section": result.section,
+        "news_query": result.news_query,
+        "web_query": result.web_query,
+        "freshness": result.freshness,
+        "reference": result.reference,
+        "reason": result.reason,
+    }
+
+
 async def chat_once(
     session: AsyncSession,
     message: str,
@@ -156,6 +209,15 @@ async def chat_stream(
                     if update:
                         final_state.update(update)
                     if node_name == "understand":
+                        # surface the routing decision so the UI can show it
+                        yield _sse(
+                            "route",
+                            {
+                                "route": (update or {}).get("mode", "NEWS"),
+                                "intent": (update or {}).get("intent", "QA"),
+                                "standalone_question": (update or {}).get("standalone_question", ""),
+                            },
+                        )
                         stage = _NEXT_STAGE.get((update or {}).get("mode", "NEWS"), "news_evidence")
                     elif node_name == "news_evidence":
                         stage = "web_evidence" if final_state.get("mode") == "BOTH" else "synthesize"
