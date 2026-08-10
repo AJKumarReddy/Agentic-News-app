@@ -74,6 +74,9 @@ export function useChat() {
               case 'notice':
                 updateAssistant((m) => ({ ...m, notice: event.detail }));
                 break;
+              case 'route':
+                updateAssistant((m) => ({ ...m, routing: event.decision }));
+                break;
               case 'error':
                 flushTokens();
                 updateAssistant((m) => ({
