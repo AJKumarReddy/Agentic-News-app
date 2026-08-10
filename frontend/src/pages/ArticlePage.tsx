@@ -21,7 +21,7 @@ export default function ArticlePage() {
     setError('');
     getArticleIntelligence(decodeURIComponent(articleId))
       .then(setIntelligence)
-      .catch(() => setError('Could not load this article. It may not exist or the API is unavailable.'))
+      .catch(() => setError('unavailable'))
       .finally(() => setLoading(false));
   }, [articleId]);
 
@@ -41,9 +41,45 @@ export default function ArticlePage() {
   }
 
   if (error || !intelligence) {
+    // NYT (and other publishers) only expose part of their catalogue through
+    // their APIs, so an article we can list is not always one we can open.
+    const isNyt = decodeURIComponent(articleId ?? '').startsWith('nyt://');
     return (
-      <div className="mx-auto max-w-4xl px-4 py-12 text-center text-ink-600">
-        {error || 'Article not found.'}
+      <div className="mx-auto max-w-2xl px-4 py-16 text-center">
+        <div className="rounded-xl border border-ink-200 bg-white p-8 shadow-card">
+          <h1 className="font-serif text-xl font-bold text-ink-900">
+            {isNyt ? 'This New York Times article can’t be opened here' : 'Article unavailable'}
+          </h1>
+          <p className="mx-auto mt-3 max-w-md text-sm leading-relaxed text-ink-600">
+            {isNyt
+              ? 'The New York Times restricts full article access through its API — only headlines and summaries are available to this app. You can read the full piece on nytimes.com.'
+              : 'This article could not be loaded. It may no longer be available, or the publisher’s API is temporarily unreachable.'}
+          </p>
+          <div className="mt-6 flex flex-wrap justify-center gap-2">
+            {isNyt && (
+              <a
+                href="https://www.nytimes.com"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-brand-700"
+              >
+                Open nytimes.com
+              </a>
+            )}
+            <button
+              onClick={() => navigate(-1)}
+              className="rounded-lg border border-ink-200 px-4 py-2 text-sm font-semibold text-ink-700 transition-colors hover:bg-ink-50"
+            >
+              Go back
+            </button>
+            <button
+              onClick={() => navigate('/search')}
+              className="rounded-lg border border-ink-200 px-4 py-2 text-sm font-semibold text-ink-700 transition-colors hover:bg-ink-50"
+            >
+              Search news
+            </button>
+          </div>
+        </div>
       </div>
     );
   }

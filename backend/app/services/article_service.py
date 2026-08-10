@@ -19,14 +19,50 @@ async def get_article(article_id: str) -> NormalizedArticle:
     cached = await cache_get(key)
     if cached:
         return NormalizedArticle.model_validate(cached)
+    # Our own index first: anything reachable from search is already stored,
+    # so this avoids a publisher round trip and keeps working for sources
+    # whose article-lookup endpoint isn't available on the current key.
+    stored = await _from_index(article_id)
+    if stored is not None:
+        await cache_set(key, stored.model_dump(mode="json"), ttl=1800)
+        return stored
+
     source = source_for_article(article_id)
     if source is None:
         raise NewsSourceError(f"No configured source owns {article_id}", 404)
     article = await source.get_article(article_id)
     if article is None:
-        raise NewsSourceError("Article not found", 404)
+        raise NewsSourceError(
+            f"{source.name} does not expose this article through its API", 404
+        )
     await cache_set(key, article.model_dump(mode="json"), ttl=1800)
     return article
+
+
+async def _from_index(article_id: str) -> NormalizedArticle | None:
+    from app.database.models import Article
+    from app.database.session import SessionFactory
+
+    async with SessionFactory() as session:
+        row = await session.get(Article, article_id)
+        if row is None or not (row.body_text or row.trail_text):
+            return None
+        return NormalizedArticle(
+            article_id=row.article_id,
+            headline=row.headline,
+            section=row.section,
+            author=row.author,
+            published_at=row.published_at,
+            url=row.url,
+            thumbnail=row.thumbnail,
+            trail_text=row.trail_text,
+            body_text=row.body_text,
+            tags=row.tags or [],
+            source=row.source,
+            source_id=row.source_id,
+            production_office=row.production_office,
+            content_hash=row.content_hash,
+        )
 
 
 async def get_related_articles(article: NormalizedArticle, limit: int = 5) -> list[NormalizedArticle]:
