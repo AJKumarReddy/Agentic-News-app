@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import APIRouter, Depends, Header, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
@@ -6,6 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database.repositories import ConversationRepository
 from app.database.session import get_session
 from app.services.chat_service import chat_once, chat_stream
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["chat"])
 
@@ -61,6 +65,31 @@ async def list_conversations(
         }
         for c in conversations
     ]
+
+
+@router.delete("/conversations", status_code=204)
+async def delete_all_conversations(
+    session: AsyncSession = Depends(get_session),
+    client_id: str = Depends(client_id_header),
+):
+    """Clear this client's chat history. Scoped by X-Client-Id, so an empty
+    id can never wipe another visitor's conversations."""
+    repo = ConversationRepository(session)
+    deleted = await repo.delete_all(client_id)
+    await session.commit()
+    logger.info("cleared %d conversations", deleted)
+
+
+@router.delete("/conversations/{conversation_id}", status_code=204)
+async def delete_conversation(
+    conversation_id: str,
+    session: AsyncSession = Depends(get_session),
+    client_id: str = Depends(client_id_header),
+):
+    repo = ConversationRepository(session)
+    if not await repo.delete(conversation_id, user_id=client_id):
+        raise HTTPException(404, "Conversation not found")
+    await session.commit()
 
 
 @router.get("/conversations/{conversation_id}")

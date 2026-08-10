@@ -48,8 +48,8 @@ def create_app() -> FastAPI:
         CORSMiddleware,
         allow_origins=settings.cors_origins,
         allow_credentials=True,
-        allow_methods=["GET", "POST", "OPTIONS"],
-        allow_headers=["Content-Type", "Authorization"],
+        allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+        allow_headers=["Content-Type", "Authorization", "X-API-Key", "X-Client-Id"],
     )
     # Middleware executes in reverse order of registration (last added = innermost)
     app.add_middleware(TimeoutMiddleware, timeout_seconds=settings.request_timeout_seconds)
