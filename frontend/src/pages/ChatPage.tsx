@@ -21,16 +21,30 @@ export default function ChatPage({ onConversationChange }: { onConversationChang
   const notifiedRef = useRef<string | null>(null);
 
   const requestedConversation = searchParams.get('conversation');
+  // tracks whether the visible chat came from the URL, so navigating away
+  // from it (back button, logo) clears it — but an in-progress new chat,
+  // which has an id without a URL param, is never wiped
+  const openedFromUrl = useRef(false);
+
   useEffect(() => {
-    if (!requestedConversation || requestedConversation === conversationId) return;
+    if (!requestedConversation) {
+      if (openedFromUrl.current) {
+        openedFromUrl.current = false;
+        reset();
+      }
+      return;
+    }
+    if (requestedConversation === conversationId) return;
     getConversation(requestedConversation)
       .then((detail) => {
+        openedFromUrl.current = true;
         setConversationId(detail.id);
         setMessages(
           detail.messages.map((m) => ({ role: m.role, content: m.content, sources: m.sources || [] })),
         );
       })
       .catch(() => undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [requestedConversation, conversationId, setConversationId, setMessages]);
 
   // Guarded against StrictMode double-invocation, which previously sent
