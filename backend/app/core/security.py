@@ -1,10 +1,19 @@
-"""Security middleware: secure headers + a lightweight per-IP rate limiter.
+"""Security layer.
+
+Middleware stack (outermost → innermost as added in main.py):
+  - SecurityHeadersMiddleware   secure response headers on every response
+  - BodySizeLimitMiddleware     reject oversized request bodies (413)
+  - ApiKeyMiddleware            optional X-API-Key gate for the whole API
+  - RateLimitMiddleware         per-IP sliding window, stricter for /api/chat
+  - TimeoutMiddleware           bound request processing time (504)
 
 The rate limiter is an in-process sliding window, sufficient for a single
-EC2 instance behind nginx. For a multi-instance deployment, swap the storage
+instance behind nginx. For a multi-instance deployment, swap the storage
 for Redis (the interface is contained in RateLimiter).
 """
 
+import asyncio
+import hmac
 import time
 from collections import defaultdict, deque
 
@@ -17,15 +26,76 @@ _SECURE_HEADERS = {
     "X-Frame-Options": "DENY",
     "Referrer-Policy": "strict-origin-when-cross-origin",
     "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+    "Cross-Origin-Opener-Policy": "same-origin",
+    "X-Permitted-Cross-Domain-Policies": "none",
+    # API responses are data, never pages — a restrictive CSP is safe here
+    "Content-Security-Policy": "default-src 'none'; frame-ancestors 'none'",
+    "Cache-Control": "no-store",
 }
+
+EXEMPT_PATHS = {"/api/health"}
+
+
+def client_ip(request: Request) -> str:
+    """Client address, honoring the X-Forwarded-For set by nginx/ALB."""
+    forwarded = request.headers.get("x-forwarded-for", "")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next) -> Response:
         response = await call_next(request)
         for key, value in _SECURE_HEADERS.items():
+            # the dev-only Swagger UI needs scripts/styles, so skip CSP there
+            if key == "Content-Security-Policy" and request.url.path.startswith("/docs"):
+                continue
             response.headers.setdefault(key, value)
         return response
+
+
+class BodySizeLimitMiddleware(BaseHTTPMiddleware):
+    """Reject requests whose declared body exceeds the limit (default 64 KB —
+    the largest legitimate payload here is a chat message)."""
+
+    def __init__(self, app, max_bytes: int = 65536):
+        super().__init__(app)
+        self.max_bytes = max_bytes
+
+    async def dispatch(self, request: Request, call_next) -> Response:
+        length = request.headers.get("content-length")
+        if length is not None:
+            try:
+                if int(length) > self.max_bytes:
+                    return JSONResponse(status_code=413, content={"detail": "Request body too large"})
+            except ValueError:
+                return JSONResponse(status_code=400, content={"detail": "Invalid Content-Length"})
+        return await call_next(request)
+
+
+class ApiKeyMiddleware(BaseHTTPMiddleware):
+    """Optional shared-secret gate: when API_KEY is configured, every request
+    (except /api/health and CORS preflights) must send it as X-API-Key.
+
+    Suited to private/internal deployments where the caller can hold a
+    secret (server-to-server, or an SPA restricted to a trusted audience).
+    A key shipped inside a public SPA bundle is discoverable — for a public
+    product, replace this with per-user auth (JWT/OAuth). Comparison is
+    constant-time to prevent timing attacks.
+    """
+
+    def __init__(self, app, api_key: str):
+        super().__init__(app)
+        self.api_key = api_key
+
+    async def dispatch(self, request: Request, call_next) -> Response:
+        if not self.api_key or request.method == "OPTIONS" or request.url.path in EXEMPT_PATHS:
+            return await call_next(request)
+        provided = request.headers.get("x-api-key", "")
+        if not hmac.compare_digest(provided.encode(), self.api_key.encode()):
+            return JSONResponse(status_code=401, content={"detail": "Invalid or missing API key"})
+        return await call_next(request)
 
 
 class RateLimiter:
@@ -46,25 +116,41 @@ class RateLimiter:
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
-    EXEMPT_PATHS = {"/api/health"}
+    """Per-IP sliding window. /api/chat gets its own (stricter) budget since
+    each request fans out into Guardian calls, embeddings, and LLM calls."""
 
-    def __init__(self, app, limit_per_minute: int = 30):
+    def __init__(self, app, limit_per_minute: int = 30, chat_limit_per_minute: int = 10):
         super().__init__(app)
         self.limiter = RateLimiter(limit_per_minute)
+        self.chat_limiter = RateLimiter(chat_limit_per_minute)
 
     async def dispatch(self, request: Request, call_next) -> Response:
-        if request.url.path in self.EXEMPT_PATHS or request.method == "OPTIONS":
+        if request.url.path in EXEMPT_PATHS or request.method == "OPTIONS":
             return await call_next(request)
-        # nginx sets X-Forwarded-For; fall back to the socket address
-        forwarded = request.headers.get("x-forwarded-for", "")
-        client_ip = forwarded.split(",")[0].strip() if forwarded else (request.client.host if request.client else "unknown")
-        if not self.limiter.allow(client_ip):
+        ip = client_ip(request)
+        limiter = self.chat_limiter if request.url.path == "/api/chat" else self.limiter
+        if not limiter.allow(f"{request.url.path == '/api/chat'}:{ip}"):
             return JSONResponse(
                 status_code=429,
                 content={"detail": "Rate limit exceeded. Please slow down."},
                 headers={"Retry-After": "30"},
             )
         return await call_next(request)
+
+
+class TimeoutMiddleware(BaseHTTPMiddleware):
+    """Bound time-to-first-byte. Streaming bodies (SSE) are not affected once
+    the response has started."""
+
+    def __init__(self, app, timeout_seconds: float = 120.0):
+        super().__init__(app)
+        self.timeout_seconds = timeout_seconds
+
+    async def dispatch(self, request: Request, call_next) -> Response:
+        try:
+            return await asyncio.wait_for(call_next(request), timeout=self.timeout_seconds)
+        except asyncio.TimeoutError:
+            return JSONResponse(status_code=504, content={"detail": "Request timed out"})
 
 
 def sanitize_user_text(text: str, max_length: int = 4000) -> str:

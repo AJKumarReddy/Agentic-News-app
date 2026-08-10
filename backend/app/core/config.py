@@ -32,7 +32,18 @@ class Settings(BaseSettings):
     cohere_api_key: str = ""
 
     max_agent_iterations: int = 6
+
+    # Security layer
     rate_limit_per_minute: int = 30
+    chat_rate_limit_per_minute: int = 10
+    api_key: str = ""  # optional X-API-Key gate; empty = disabled
+    allowed_hosts: str = ""  # comma-separated Host allowlist; empty = any
+    max_body_bytes: int = 65536
+    request_timeout_seconds: int = 120
+
+    @property
+    def allowed_hosts_list(self) -> list[str]:
+        return [h.strip() for h in self.allowed_hosts.split(",") if h.strip()]
 
     @property
     def cors_origins(self) -> list[str]:
