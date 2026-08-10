@@ -16,7 +16,7 @@ export default function ArticleCard({ article }: { article: Article }) {
       <div className="flex flex-1 flex-col p-4">
         <div className="mb-1 flex items-center gap-2 text-xs text-slate-500">
           {article.section && (
-            <span className="rounded bg-guardian-50 px-1.5 py-0.5 font-semibold text-guardian-700">
+            <span className="rounded bg-brand-50 px-1.5 py-0.5 font-semibold text-brand-700">
               {article.section}
             </span>
           )}
@@ -24,7 +24,7 @@ export default function ArticleCard({ article }: { article: Article }) {
         </div>
         <Link
           to={`/article/${encodeURIComponent(article.article_id)}`}
-          className="font-serif text-base font-bold leading-snug text-slate-900 hover:text-guardian-700"
+          className="font-serif text-base font-bold leading-snug text-slate-900 hover:text-brand-700"
         >
           {article.headline}
         </Link>
@@ -50,7 +50,7 @@ export default function ArticleCard({ article }: { article: Article }) {
                 },
               })
             }
-            className="rounded-lg bg-guardian-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-guardian-700"
+            className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-700"
           >
             Ask AI
           </button>

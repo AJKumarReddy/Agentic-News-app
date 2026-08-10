@@ -1,13 +1,14 @@
-"""Chat orchestration: conversation persistence, structured memory, and SSE
-streaming of agent progress + LLM tokens.
+"""Chat orchestration: conversation persistence, memory, and SSE streaming.
 
 SSE event types sent to the frontend:
-  status  {stage, detail}      — pipeline progress ("Searching The Guardian…")
-  token   {delta}              — incremental answer text
-  sources {sources: [...]}     — numbered Guardian citations
-  state   {conversation_id}    — ids for follow-up requests
-  done    {}                   — stream complete
-  error   {detail}             — something failed
+  state    {conversation_id}       — ids for follow-up requests
+  status   {stage, detail}         — pipeline progress
+  token    {delta}                 — incremental answer text
+  sources  {sources: [...]}        — numbered citations
+  notice   {detail}                — retrieval metadata (e.g. widened window),
+                                     shown as a UI badge, never as answer prose
+  done     {}
+  error    {detail}
 """
 
 import json
@@ -17,7 +18,7 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.agents.graph import build_agent_graph, route_after_classify, run_agent
+from app.agents.graph import build_agent_graph, run_agent
 from app.agents.state import default_conversation_state
 from app.core.logging import Timer, log_event
 from app.core.security import sanitize_user_text
@@ -26,12 +27,18 @@ from app.database.repositories import ConversationRepository
 logger = logging.getLogger(__name__)
 
 _STAGE_LABELS = {
-    "classify": "Understanding your question…",
-    "decide_source": "Deciding where to look…",
-    "fetch_fresh": "Searching The Guardian for current reporting…",
-    "retrieve": "Retrieving and ranking relevant Guardian coverage…",
-    "web_search": "Checking additional sources on the web…",
-    "synthesize": "Writing a grounded answer…",
+    "understand": "Understanding your question…",
+    "article_evidence": "Reading the article…",
+    "news_evidence": "Searching news coverage…",
+    "web_evidence": "Searching the web…",
+    "synthesize": "Writing the answer…",
+}
+
+_NEXT_STAGE = {
+    "ARTICLE": "article_evidence",
+    "NEWS": "news_evidence",
+    "BOTH": "news_evidence",
+    "WEB": "web_evidence",
 }
 
 
@@ -39,30 +46,19 @@ def _sse(event: str, data: dict[str, Any]) -> str:
     return f"event: {event}\ndata: {json.dumps(data, default=str, ensure_ascii=False)}\n\n"
 
 
-def _summarize_history(messages: list, max_turns: int = 4, max_chars: int = 1200) -> str:
-    """Compact recent turns for the LLM instead of resending full history."""
-    recent = messages[-max_turns * 2 :]
-    lines = []
-    for message in recent:
-        text = message.content[:300].replace("\n", " ")
-        lines.append(f"{message.role}: {text}")
-    summary = "\n".join(lines)
-    return summary[-max_chars:]
-
-
-def _updated_state(previous: dict, final_state: dict) -> dict:
-    entities = final_state.get("entities") or previous.get("entities", [])
-    topics = final_state.get("topics") or []
+def _updated_state(previous: dict, final: dict) -> dict:
+    topics = final.get("topics") or []
     return {
-        "topic": (topics[0] if topics else previous.get("topic", "")),
-        "entities": entities,
+        "topic": topics[0] if topics else previous.get("topic", ""),
+        "entities": final.get("entities") or previous.get("entities", []),
         "date_range": {
-            "from_date": final_state.get("from_date") or "",
-            "to_date": final_state.get("to_date") or "",
+            "from_date": final.get("from_date") or "",
+            "to_date": final.get("to_date") or "",
         },
         "active_article_id": previous.get("active_article_id", ""),
-        "previous_intent": final_state.get("intent", ""),
-        "last_sources": final_state.get("sources", [])[:10],
+        "active_article_headline": previous.get("active_article_headline", ""),
+        "previous_intent": final.get("intent", ""),
+        "last_sources": final.get("sources", [])[:10],
     }
 
 
@@ -74,16 +70,20 @@ async def _prepare(
     client_id: str = "",
 ):
     repo = ConversationRepository(session)
-    # ownership-checked: another client's conversation id starts a fresh chat
     conversation = await repo.get(conversation_id, user_id=client_id) if conversation_id else None
     if conversation is None:
         conversation = await repo.create(title=message[:60], user_id=client_id)
     state = conversation.state or default_conversation_state()
     if article_id:
         state["active_article_id"] = article_id
-    history = await repo.get_recent_messages(conversation.id, n=8)
+
+    # Real turns, not a flattened summary: the understanding step needs to
+    # resolve references like "related news" against what was actually said.
+    previous = await repo.get_recent_messages(conversation.id, n=6)
+    history = [{"role": m.role, "content": m.content} for m in previous]
+
     await repo.add_message(conversation, "user", message)
-    return repo, conversation, state, _summarize_history(history)
+    return repo, conversation, state, history
 
 
 async def chat_once(
@@ -93,24 +93,26 @@ async def chat_once(
     article_id: str | None = None,
     client_id: str = "",
 ) -> dict[str, Any]:
-    """Non-streaming chat used by tests, evaluation, and stream=false clients."""
+    """Non-streaming chat (tests, evaluation, stream=false clients)."""
     message = sanitize_user_text(message)
-    repo, conversation, conv_state, summary = await _prepare(
+    repo, conversation, conv_state, history = await _prepare(
         session, message, conversation_id, article_id, client_id
     )
     with Timer() as timer:
-        final = await run_agent(session, message, conv_state, summary)
+        final = await run_agent(session, message, conv_state, history)
     answer = final.get("answer", "")
     sources = final.get("sources", [])
     conversation.state = _updated_state(conv_state, final)
     await repo.add_message(conversation, "assistant", answer, sources)
     await session.commit()
-    log_event(logger, "chat_complete", intent=final.get("intent"), total_latency=timer.ms)
+    log_event(logger, "chat_complete", mode=final.get("mode"), total_latency=timer.ms)
     return {
         "conversation_id": conversation.id,
         "answer": answer,
         "sources": sources,
+        "mode": final.get("mode", ""),
         "intent": final.get("intent", ""),
+        "notice": final.get("notice", ""),
         "steps": final.get("steps", []),
     }
 
@@ -122,64 +124,58 @@ async def chat_stream(
     article_id: str | None = None,
     client_id: str = "",
 ) -> AsyncGenerator[str, None]:
-    """SSE generator streaming pipeline status and answer tokens."""
     message = sanitize_user_text(message)
     try:
-        repo, conversation, conv_state, summary = await _prepare(
+        repo, conversation, conv_state, history = await _prepare(
             session, message, conversation_id, article_id, client_id
         )
         yield _sse("state", {"conversation_id": conversation.id})
+        yield _sse("status", {"stage": "understand", "detail": _STAGE_LABELS["understand"]})
 
         graph = build_agent_graph(session)
         initial = {
             "query": message,
             "conversation_state": conv_state,
-            "conversation_summary": summary,
+            "history": history,
             "steps": [],
         }
 
         final_state: dict[str, Any] = dict(initial)
-        streamed_any_token = False
-        yield _sse("status", {"stage": "classify", "detail": _STAGE_LABELS["classify"]})
+        streamed_any = False
 
-        async for mode, payload in graph.astream(initial, stream_mode=["updates", "messages"]):
-            if mode == "messages":
+        async for stream_mode, payload in graph.astream(
+            initial, stream_mode=["updates", "messages"]
+        ):
+            if stream_mode == "messages":
                 chunk, metadata = payload
                 if metadata.get("langgraph_node") == "synthesize" and getattr(chunk, "content", ""):
-                    streamed_any_token = True
+                    streamed_any = True
                     yield _sse("token", {"delta": chunk.content})
-            elif mode == "updates":
+            else:
                 for node_name, update in payload.items():
                     if update:
                         final_state.update(update)
-                    # announce the next stage; classification defers to the graph's own routing
-                    if node_name == "classify":
-                        next_stage = "decide_source"
-                    elif node_name == "decide_source":
-                        next_stage = (
-                            "web_search"
-                            if (update or {}).get("evidence_plan") == "WEB"
-                            else route_after_classify(final_state)
-                        )
+                    if node_name == "understand":
+                        stage = _NEXT_STAGE.get((update or {}).get("mode", "NEWS"), "news_evidence")
+                    elif node_name == "news_evidence":
+                        stage = "web_evidence" if final_state.get("mode") == "BOTH" else "synthesize"
+                    elif node_name in ("article_evidence", "web_evidence"):
+                        stage = "synthesize"
                     else:
-                        next_stage = {
-                            "fetch_fresh": "retrieve",
-                            "retrieve": "synthesize",
-                            "web_search": "synthesize",
-                        }.get(node_name)
-                    if next_stage:
-                        yield _sse("status", {"stage": next_stage, "detail": _STAGE_LABELS.get(next_stage, "")})
+                        stage = None
+                    if stage:
+                        yield _sse("status", {"stage": stage, "detail": _STAGE_LABELS.get(stage, "")})
 
         answer = final_state.get("answer", "")
-        if answer and not streamed_any_token:
-            # Model tokens were not surfaced by the graph stream — send whole answer
+        if answer and not streamed_any:
             yield _sse("token", {"delta": answer})
 
-        sources = final_state.get("sources", [])
-        yield _sse("sources", {"sources": sources})
+        if final_state.get("notice"):
+            yield _sse("notice", {"detail": final_state["notice"]})
+        yield _sse("sources", {"sources": final_state.get("sources", [])})
 
         conversation.state = _updated_state(conv_state, final_state)
-        await repo.add_message(conversation, "assistant", answer, sources)
+        await repo.add_message(conversation, "assistant", answer, final_state.get("sources", []))
         await session.commit()
         yield _sse("done", {})
     except Exception:

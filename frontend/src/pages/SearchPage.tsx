@@ -68,14 +68,14 @@ export default function SearchPage() {
   return (
     <div className="h-full overflow-y-auto">
       <div className="mx-auto max-w-6xl px-4 py-6">
-        <h1 className="font-serif text-2xl font-bold text-guardian-900">Search Guardian News</h1>
+        <h1 className="font-serif text-2xl font-bold text-brand-900">Search Guardian News</h1>
 
         <form onSubmit={submit} className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-6">
           <input
             value={queryInput}
             onChange={(e) => setQueryInput(e.target.value)}
             placeholder="Search keywords…"
-            className="col-span-2 rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-guardian-500 focus:outline-none md:col-span-2"
+            className="col-span-2 rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none md:col-span-2"
           />
           <select
             value={section}
@@ -116,7 +116,7 @@ export default function SearchPage() {
             <button
               type="submit"
               disabled={loading}
-              className="rounded-lg bg-guardian-600 px-4 py-2 text-sm font-semibold text-white hover:bg-guardian-700 disabled:opacity-50"
+              className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-50"
             >
               Search
             </button>

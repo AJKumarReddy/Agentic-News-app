@@ -1,4 +1,4 @@
-const STORAGE_KEY = 'guardian-client-id';
+const STORAGE_KEY = 'news-ai-client-id';
 
 /**
  * Anonymous per-browser identity. Conversations are scoped to this ID on the

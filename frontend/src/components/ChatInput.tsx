@@ -34,7 +34,7 @@ export default function ChatInput({
         rows={1}
         maxLength={4000}
         placeholder={placeholder}
-        className="flex-1 resize-none rounded-xl border border-slate-300 bg-white px-4 py-3 text-[15px] shadow-sm focus:border-guardian-500 focus:outline-none focus:ring-2 focus:ring-guardian-100"
+        className="flex-1 resize-none rounded-xl border border-slate-300 bg-white px-4 py-3 text-[15px] shadow-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100"
       />
       {busy && onStop ? (
         <button
@@ -48,7 +48,7 @@ export default function ChatInput({
         <button
           type="submit"
           disabled={busy || !text.trim()}
-          className="rounded-xl bg-guardian-600 px-5 py-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-guardian-700 disabled:cursor-not-allowed disabled:opacity-50"
+          className="rounded-xl bg-brand-600 px-5 py-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-50"
         >
           Send
         </button>

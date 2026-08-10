@@ -26,16 +26,20 @@ async def search_web(
     query: str,
     max_results: int | None = None,
     days: int | None = None,
+    news_like: bool = True,
+    allow_domains: list[str] | None = None,
 ) -> list[WebResult]:
-    """Supplementary web search (Tavily). Guardian domains are excluded so web
-    results never duplicate or masquerade as Guardian reporting.
+    """Web search (Tavily) with quality gates. Guardian domains are excluded so
+    web results never duplicate or masquerade as Guardian reporting.
     Returns [] when no TAVILY_API_KEY is configured."""
     settings = get_settings()
     return await get_web_client().search(
         query,
         max_results=max_results or settings.web_search_max_results,
+        topic="news" if news_like else "general",
         days=days,
         exclude_domains=["theguardian.com"],
+        allow_domains=allow_domains,
     )
 
 
