@@ -1,10 +1,20 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, NavLink, useNavigate, useSearchParams } from 'react-router-dom';
-import { SECTIONS } from '../constants/sections';
+import { SECTIONS, SECTION_GROUPS } from '../constants/sections';
+import ThemeToggle from './ThemeToggle';
+import type { Theme } from '../hooks/useTheme';
 import { deleteAllConversations, deleteConversation, listConversations, listSources } from '../services/api';
 import type { ConversationSummary, NewsSourceInfo } from '../types';
 
-export default function Sidebar({ refreshKey }: { refreshKey?: number }) {
+export default function Sidebar({
+  refreshKey,
+  theme,
+  onToggleTheme,
+}: {
+  refreshKey?: number;
+  theme: Theme;
+  onToggleTheme: () => void;
+}) {
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [sources, setSources] = useState<NewsSourceInfo[]>([]);
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
@@ -86,24 +96,26 @@ export default function Sidebar({ refreshKey }: { refreshKey?: number }) {
         </NavLink>
       </div>
 
-      <div className="px-3 pt-2">
-        <div className="px-3 pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-white/35">
-          Sections
-        </div>
-        <div className="space-y-0.5">
-          {SECTIONS.map((section) => (
-            <Link
-              key={section.id}
-              to={`/search?section=${section.id}`}
-              className="block rounded-lg px-3 py-1.5 text-[13px] text-white/70 transition-colors hover:bg-white/5 hover:text-white"
-            >
-              {section.label}
-            </Link>
-          ))}
-        </div>
-      </div>
+      <div className="mt-1 flex-1 overflow-y-auto px-3">
+        {SECTION_GROUPS.map((group) => (
+          <div key={group} className="pb-2">
+            <div className="px-3 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wider text-white/35">
+              {group}
+            </div>
+            <div className="grid grid-cols-2 gap-x-1 gap-y-0.5">
+              {SECTIONS.filter((s) => s.group === group).map((section) => (
+                <Link
+                  key={section.id}
+                  to={`/search?section=${section.id}`}
+                  className="truncate rounded-lg px-2.5 py-1.5 text-[12.5px] text-white/70 transition-colors hover:bg-white/5 hover:text-white"
+                >
+                  {section.label}
+                </Link>
+              ))}
+            </div>
+          </div>
+        ))}
 
-      <div className="mt-4 flex-1 overflow-y-auto px-3">
         <div className="flex items-center justify-between px-3 pb-1.5">
           <span className="text-[10px] font-semibold uppercase tracking-wider text-white/35">
             Recent chats
@@ -152,7 +164,11 @@ export default function Sidebar({ refreshKey }: { refreshKey?: number }) {
         </div>
       </div>
 
-      <div className="border-t border-white/10 px-5 py-3.5 text-[10px] leading-relaxed text-white/35">
+      <div className="border-t border-white/10 p-2">
+        <ThemeToggle theme={theme} onToggle={onToggleTheme} />
+      </div>
+
+      <div className="border-t border-white/10 px-5 py-3 text-[10px] leading-relaxed text-white/35">
         {sources.length > 0 ? (
           <>Sourced from {sources.map((s) => s.name).join(' · ')}</>
         ) : (

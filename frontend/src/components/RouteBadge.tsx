@@ -3,22 +3,22 @@ import type { RouteDecision } from '../types';
 const ROUTE_LABELS: Record<string, { label: string; className: string; title: string }> = {
   ARTICLE: {
     label: 'Article',
-    className: 'bg-brand-50 text-brand-700',
+    className: 'bg-brand-50 text-brand-700 dark:bg-brand-500/20 dark:text-brand-200',
     title: 'Answered from the article you are viewing — no search needed',
   },
   NEWS: {
     label: 'Newsrooms',
-    className: 'bg-brand-50 text-brand-700',
+    className: 'bg-brand-50 text-brand-700 dark:bg-brand-500/20 dark:text-brand-200',
     title: 'Answered from indexed newsroom reporting',
   },
   WEB: {
     label: 'Web',
-    className: 'bg-warm-50 text-warm-700',
+    className: 'bg-warm-50 text-warm-700 dark:bg-warm-500/20 dark:text-warm-200',
     title: 'Answered from web sources',
   },
   BOTH: {
     label: 'News + Web',
-    className: 'bg-accent-50 text-accent-700',
+    className: 'bg-accent-50 text-accent-700 dark:bg-accent-500/20 dark:text-accent-200',
     title: 'Answered from newsroom reporting plus web sources',
   },
 };
@@ -35,13 +35,13 @@ export default function RouteBadge({ routing }: { routing: RouteDecision }) {
         {route.label}
       </span>
       {routing.intent && (
-        <span className="rounded bg-ink-100 px-1.5 py-0.5 font-medium text-ink-600">
+        <span className="rounded bg-ink-100 dark:bg-ink-700 px-1.5 py-0.5 font-medium text-ink-600 dark:text-ink-300">
           {routing.intent.toLowerCase().replace('_', ' ')}
         </span>
       )}
       {rewritten && (
         <span
-          className="truncate text-ink-400"
+          className="truncate text-ink-400 dark:text-ink-500"
           title={`Interpreted as: ${rewritten}`}
         >
           understood as “{rewritten.length > 70 ? `${rewritten.slice(0, 70)}…` : rewritten}”

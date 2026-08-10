@@ -1,5 +1,6 @@
 /** @type {import('tailwindcss').Config} */
 export default {
+  darkMode: 'class',
   content: ['./index.html', './src/**/*.{ts,tsx}'],
   theme: {
     extend: {
@@ -64,6 +65,7 @@ export default {
         'brand-gradient': 'linear-gradient(135deg, #5f3fd8 0%, #7355ee 45%, #18aca1 100%)',
         'brand-soft': 'linear-gradient(135deg, #f3f2ff 0%, #eefdfa 100%)',
         'sidebar-gradient': 'linear-gradient(175deg, #281a5c 0%, #180f38 55%, #134949 100%)',
+        'brand-soft-dark': 'linear-gradient(135deg, #14121f 0%, #101a1e 100%)',
       },
       fontFamily: {
         serif: ['Georgia', 'Times New Roman', 'serif'],
