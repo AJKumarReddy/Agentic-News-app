@@ -18,7 +18,7 @@ async def test_health_reports_component_status(client, monkeypatch):
         return True
 
     async def cache_get(key):
-        return "available"
+        return {"guardian": "available", "nyt": "available"}
 
     monkeypatch.setattr(health_module, "check_db", ok)
     monkeypatch.setattr(health_module, "check_vector_extension", ok)
@@ -32,7 +32,9 @@ async def test_health_reports_component_status(client, monkeypatch):
     assert body["status"] == "healthy"
     assert body["database"] == "connected"
     assert body["vector_database"] == "connected"
-    assert body["guardian_api"] == "available"
+    # every configured publisher is reported individually
+    assert body["sources"]["guardian"] == "available"
+    assert body["sources"]["nyt"] == "available"
 
 
 async def test_health_degraded_without_db(client, monkeypatch):
@@ -43,7 +45,7 @@ async def test_health_degraded_without_db(client, monkeypatch):
         return True
 
     async def cache_get(key):
-        return "available"
+        return {"guardian": "available"}
 
     monkeypatch.setattr(health_module, "check_db", fail)
     monkeypatch.setattr(health_module, "check_vector_extension", fail)

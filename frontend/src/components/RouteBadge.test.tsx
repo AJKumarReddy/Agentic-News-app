@@ -3,11 +3,11 @@ import { describe, expect, it } from 'vitest';
 import RouteBadge from './RouteBadge';
 
 describe('RouteBadge', () => {
-  it('labels a Guardian-routed answer', () => {
+  it('labels a newsroom-routed answer', () => {
     render(
       <RouteBadge routing={{ route: 'NEWS', intent: 'LATEST', standalone_question: 'Latest AI news' }} />,
     );
-    expect(screen.getByText('Guardian')).toBeInTheDocument();
+    expect(screen.getByText('Newsrooms')).toBeInTheDocument();
     expect(screen.getByText('latest')).toBeInTheDocument();
   });
 
@@ -18,7 +18,7 @@ describe('RouteBadge', () => {
 
   it('labels a mixed-source answer', () => {
     render(<RouteBadge routing={{ route: 'BOTH', intent: 'ENTITY', standalone_question: 'q' }} />);
-    expect(screen.getByText('Guardian + Web')).toBeInTheDocument();
+    expect(screen.getByText('News + Web')).toBeInTheDocument();
   });
 
   it('shows how a terse follow-up was interpreted', () => {

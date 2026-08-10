@@ -12,6 +12,9 @@ const SOURCES: Source[] = [
     published_at: '2026-08-07T10:00:00Z',
     section: 'Technology',
     author: 'Jane Reporter',
+    type: 'publisher',
+    source_id: 'guardian',
+    source: 'The Guardian',
   },
   {
     n: 2,
@@ -21,6 +24,9 @@ const SOURCES: Source[] = [
     published_at: '2026-08-05T09:00:00Z',
     section: 'Business',
     author: '',
+    type: 'publisher',
+    source_id: 'nyt',
+    source: 'The New York Times',
   },
 ];
 
@@ -40,9 +46,15 @@ describe('SourceList', () => {
     expect(screen.getByText('2')).toBeInTheDocument();
   });
 
-  it('shows author and section metadata', () => {
+  it('shows author metadata', () => {
     render(<SourceList sources={SOURCES} />);
     expect(screen.getByText(/Jane Reporter/)).toBeInTheDocument();
-    expect(screen.getByText(/Business/)).toBeInTheDocument();
+  });
+
+  it('labels each source with its publisher', () => {
+    render(<SourceList sources={SOURCES} />);
+    // a reader must be able to tell which newsroom reported which claim
+    expect(screen.getByText('Guardian')).toBeInTheDocument();
+    expect(screen.getByText('NY Times')).toBeInTheDocument();
   });
 });

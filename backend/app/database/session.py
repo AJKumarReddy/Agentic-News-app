@@ -47,6 +47,12 @@ async def init_db() -> None:
             await conn.execute(
                 text(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS production_office VARCHAR(8) DEFAULT ''")
             )
+            await conn.execute(
+                text(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS source_id VARCHAR(32) DEFAULT 'guardian'")
+            )
+        await conn.execute(
+            text("ALTER TABLE chunks ADD COLUMN IF NOT EXISTS source VARCHAR(64) DEFAULT 'The Guardian'")
+        )
     logger.info("Database initialized")
 
 

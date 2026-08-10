@@ -25,6 +25,7 @@ class RetrievalFilters:
     tags: list[str] = field(default_factory=list)
     article_ids: list[str] = field(default_factory=list)
     authors: list[str] = field(default_factory=list)
+    source_ids: list[str] = field(default_factory=list)
 
     @classmethod
     def from_iso(
@@ -65,6 +66,8 @@ def _apply_filters(stmt, filters: RetrievalFilters | None):
         stmt = stmt.where(func.lower(Chunk.section).in_([s.lower() for s in filters.sections]))
     if filters.article_ids:
         stmt = stmt.where(Chunk.article_id.in_(filters.article_ids))
+    if filters.source_ids:
+        stmt = stmt.where(Chunk.source_id.in_(filters.source_ids))
     if filters.authors:
         stmt = stmt.where(func.lower(Chunk.author).in_([a.lower() for a in filters.authors]))
     if filters.tags:

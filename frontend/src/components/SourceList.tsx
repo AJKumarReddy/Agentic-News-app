@@ -1,27 +1,28 @@
 import type { Source } from '../types';
 import { formatArticleDate } from '../utils/date';
+import SourceChip from './SourceChip';
 
 export default function SourceList({ sources }: { sources: Source[] }) {
   if (sources.length === 0) return null;
 
-  const guardianCount = sources.filter((s) => s.type !== 'web').length;
-  const webCount = sources.length - guardianCount;
+  const webCount = sources.filter((s) => s.type === 'web').length;
+  const newsCount = sources.length - webCount;
 
   return (
-    <div className="mt-4 border-t border-slate-200 pt-3">
-      <div className="mb-2 flex items-baseline gap-2">
-        <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Sources</span>
-        {webCount > 0 && (
-          <span className="text-[11px] text-slate-400">
-            {guardianCount} from The Guardian · {webCount} from the web
-          </span>
-        )}
+    <div className="mt-5 border-t border-ink-200 pt-3">
+      <div className="mb-2.5 flex items-baseline gap-2">
+        <span className="text-[11px] font-semibold uppercase tracking-wider text-ink-500">Sources</span>
+        <span className="text-[11px] text-ink-400">
+          {newsCount > 0 && `${newsCount} from newsrooms`}
+          {newsCount > 0 && webCount > 0 && ' · '}
+          {webCount > 0 && `${webCount} from the web`}
+        </span>
       </div>
-      <ol className="space-y-2">
+      <ol className="space-y-2.5">
         {sources.map((source) => {
           const isWeb = source.type === 'web';
           return (
-            <li key={source.n} className="flex gap-2 text-sm">
+            <li key={source.n} className="flex gap-2.5 text-sm">
               <span
                 className={`mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded text-[11px] font-bold ${
                   isWeb ? 'bg-amber-100 text-amber-700' : 'bg-brand-100 text-brand-700'
@@ -34,23 +35,19 @@ export default function SourceList({ sources }: { sources: Source[] }) {
                   href={source.url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className={`font-medium hover:underline ${
-                    isWeb ? 'text-amber-800' : 'text-brand-700'
-                  }`}
+                  className="font-medium text-ink-800 underline-offset-2 hover:text-brand-700 hover:underline"
                 >
                   {source.headline}
                 </a>
-                <div className="text-xs text-slate-500">
-                  {isWeb ? (
-                    <span className="rounded bg-amber-50 px-1 py-0.5 font-medium text-amber-700">
-                      Web · {source.source || 'external'}
-                    </span>
-                  ) : (
-                    'The Guardian'
-                  )}
-                  {source.published_at && <> · {formatArticleDate(source.published_at)}</>}
-                  {source.author && <> · {source.author}</>}
-                  {source.section && <> · {source.section}</>}
+                <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-ink-500">
+                  <SourceChip
+                    sourceId={isWeb ? 'web' : source.source_id}
+                    name={source.source}
+                    size="xs"
+                  />
+                  {isWeb ? <span>{source.source}</span> : source.source && <span>{source.source}</span>}
+                  {source.published_at && <span>· {formatArticleDate(source.published_at)}</span>}
+                  {source.author && <span>· {source.author}</span>}
                 </div>
               </div>
             </li>

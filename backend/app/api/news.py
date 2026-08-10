@@ -4,10 +4,17 @@ from fastapi import APIRouter, Query
 
 from app.services.article_service import analyze_article, get_article, get_related_articles
 from app.services.search_service import search_news
+from app.sources import enabled_sources
 
 router = APIRouter(prefix="/news", tags=["news"])
 
-# GuardianAPIError raised below is translated to 404/502 by the
+
+@router.get("/sources")
+async def list_sources():
+    """Publishers currently active, for the UI's source filter."""
+    return [{"id": s.id, "name": s.name, "domain": s.domain} for s in enabled_sources()]
+
+# NewsSourceError raised below is translated to 404/502 by the
 # global exception handler in app.main.
 
 
@@ -22,6 +29,7 @@ async def search(
     order_by: str = Query(default="newest", pattern="^(newest|oldest|relevance)$"),
     page: int = Query(default=1, ge=1, le=100),
     page_size: int = Query(default=12, ge=1, le=50),
+    sources: str | None = Query(default=None, max_length=64, description="comma-separated source ids"),
 ):
     result = await search_news(
         query=q,
@@ -33,6 +41,7 @@ async def search(
         order_by=order_by,
         page=page,
         page_size=page_size,
+        sources=[s.strip() for s in sources.split(",")] if sources else None,
     )
     # cards never render bodies — don't ship ~100 KB of dead payload per page
     return result.model_dump(mode="json", exclude={"articles": {"__all__": {"body_text"}}})

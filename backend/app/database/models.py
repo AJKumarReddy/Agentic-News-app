@@ -34,6 +34,7 @@ class Article(Base):
     tags: Mapped[list] = mapped_column(JSONB, default=list)
     production_office: Mapped[str] = mapped_column(String(8), default="", index=True)
     source: Mapped[str] = mapped_column(String(64), default="The Guardian")
+    source_id: Mapped[str] = mapped_column(String(32), default="guardian", index=True)
     retrieved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     # Incremental-indexing bookkeeping
@@ -66,8 +67,10 @@ class Chunk(Base):
     author: Mapped[str] = mapped_column(String(512), default="")
     url: Mapped[str] = mapped_column(Text, default="")
     tags: Mapped[list] = mapped_column(JSONB, default=list)
-    # denormalized so edition ranking needs no join
+    # denormalized so edition ranking and source badges need no join
     production_office: Mapped[str] = mapped_column(String(8), default="", index=True)
+    source: Mapped[str] = mapped_column(String(64), default="The Guardian")
+    source_id: Mapped[str] = mapped_column(String(32), default="guardian", index=True)
 
     article: Mapped[Article] = relationship(back_populates="chunks")
 

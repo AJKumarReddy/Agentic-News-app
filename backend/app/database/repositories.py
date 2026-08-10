@@ -36,6 +36,7 @@ class ArticleRepository:
         article.tags = normalized.tags
         article.production_office = normalized.production_office
         article.source = normalized.source
+        article.source_id = normalized.source_id
         article.retrieved_at = normalized.retrieved_at
         return article
 

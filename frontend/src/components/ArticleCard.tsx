@@ -1,61 +1,73 @@
 import { Link, useNavigate } from 'react-router-dom';
 import type { Article } from '../types';
 import { formatArticleDate } from '../utils/date';
+import SourceChip from './SourceChip';
 
 export default function ArticleCard({ article }: { article: Article }) {
   const navigate = useNavigate();
   const published = formatArticleDate(article.published_at, 'short');
+  const href = `/article/${encodeURIComponent(article.article_id)}`;
 
   return (
-    <div className="flex flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm transition-shadow hover:shadow-md">
-      {article.thumbnail && (
-        <Link to={`/article/${encodeURIComponent(article.article_id)}`}>
-          <img src={article.thumbnail} alt="" className="h-40 w-full object-cover" loading="lazy" />
+    <article className="group flex flex-col overflow-hidden rounded-xl border border-ink-200 bg-white shadow-card transition-all duration-200 hover:-translate-y-0.5 hover:border-ink-300 hover:shadow-lift">
+      {article.thumbnail ? (
+        <Link to={href} className="block overflow-hidden bg-ink-100">
+          <img
+            src={article.thumbnail}
+            alt=""
+            className="h-44 w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
+            loading="lazy"
+          />
         </Link>
+      ) : (
+        <Link to={href} className="block h-2 bg-gradient-to-r from-brand-400 to-brand-600" />
       )}
+
       <div className="flex flex-1 flex-col p-4">
-        <div className="mb-1 flex items-center gap-2 text-xs text-slate-500">
-          {article.section && (
-            <span className="rounded bg-brand-50 px-1.5 py-0.5 font-semibold text-brand-700">
-              {article.section}
-            </span>
-          )}
-          {published && <span>{published}</span>}
+        <div className="mb-2 flex flex-wrap items-center gap-1.5 text-[11px] text-ink-500">
+          <SourceChip sourceId={article.source_id} name={article.source} size="xs" />
+          {article.section && <span className="font-medium text-ink-600">{article.section}</span>}
+          {published && <span>· {published}</span>}
         </div>
+
         <Link
-          to={`/article/${encodeURIComponent(article.article_id)}`}
-          className="font-serif text-base font-bold leading-snug text-slate-900 hover:text-brand-700"
+          to={href}
+          className="font-serif text-[17px] font-bold leading-snug text-ink-900 transition-colors group-hover:text-brand-700"
         >
           {article.headline}
         </Link>
-        {article.author && <div className="mt-1 text-xs text-slate-500">{article.author}</div>}
+
+        {article.author && <div className="mt-1.5 text-xs text-ink-500">{article.author}</div>}
         {article.trail_text && (
-          <p className="mt-2 line-clamp-3 text-sm text-slate-600">{article.trail_text}</p>
+          <p className="mt-2 line-clamp-3 text-[13px] leading-relaxed text-ink-600">
+            {article.trail_text}
+          </p>
         )}
-        <div className="mt-auto flex gap-2 pt-3">
+
+        <div className="mt-auto flex gap-2 pt-4">
           <a
             href={article.url}
             target="_blank"
             rel="noopener noreferrer"
-            className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+            className="rounded-lg border border-ink-200 px-3 py-1.5 text-xs font-semibold text-ink-700 transition-colors hover:border-ink-300 hover:bg-ink-50"
           >
-            Read Article
+            Read
           </a>
           <button
             onClick={() =>
               navigate('/', {
                 state: {
-                  prefill: `Tell me about this Guardian article: "${article.headline}"`,
+                  prefill: `Tell me about this article: "${article.headline}"`,
                   articleId: article.article_id,
                 },
               })
             }
-            className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-700"
+            className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-brand-700"
           >
             Ask AI
           </button>
         </div>
       </div>
-    </div>
+    </article>
   );
 }

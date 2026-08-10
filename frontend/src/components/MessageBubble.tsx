@@ -9,8 +9,8 @@ import type { ChatMessage } from '../types';
 function MessageBubble({ message }: { message: ChatMessage }) {
   if (message.role === 'user') {
     return (
-      <div className="flex justify-end">
-        <div className="max-w-[85%] rounded-2xl rounded-br-sm bg-brand-600 px-4 py-2.5 text-[15px] text-white shadow-sm">
+      <div className="flex animate-fade-up justify-end">
+        <div className="max-w-[80%] rounded-2xl rounded-br-md bg-brand-600 px-4 py-2.5 text-[15px] leading-relaxed text-white shadow-sm">
           {message.content}
         </div>
       </div>
@@ -18,25 +18,33 @@ function MessageBubble({ message }: { message: ChatMessage }) {
   }
 
   return (
-    <div className="flex justify-start">
-      <div className="max-w-[92%] w-full rounded-2xl rounded-bl-sm bg-white px-5 py-4 shadow-sm border border-slate-100">
+    <div className="flex animate-fade-up justify-start">
+      <div className="w-full max-w-[94%] rounded-2xl rounded-bl-md border border-ink-200 bg-white px-5 py-4 shadow-card">
         {message.status && (
-          <div className="flex items-center gap-2 text-sm text-slate-500">
-            <span className="h-2 w-2 animate-pulse rounded-full bg-brand-500" />
+          <div className="flex items-center gap-2 py-1 text-sm text-ink-500">
+            <span className="relative flex h-2 w-2">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-brand-400 opacity-75" />
+              <span className="relative inline-flex h-2 w-2 rounded-full bg-brand-500" />
+            </span>
             {message.status}
           </div>
         )}
+
         {message.routing && !message.streaming && <RouteBadge routing={message.routing} />}
+
         {message.notice && !message.streaming && (
-          <div className="mb-3 flex items-start gap-1.5 rounded-lg bg-amber-50 px-2.5 py-1.5 text-xs text-amber-800">
-            <span aria-hidden="true">ⓘ</span>
-            <span>{message.notice}</span>
+          <div className="mb-3 inline-flex items-center gap-1.5 rounded-md bg-amber-50 px-2.5 py-1 text-[11px] font-medium text-amber-800">
+            <span aria-hidden="true">◷</span>
+            {message.notice}
           </div>
         )}
+
         {message.content && <Markdown content={message.content} sources={message.sources} />}
+
         {message.streaming && message.content && (
-          <span className="ml-1 inline-block h-4 w-1.5 animate-pulse bg-brand-500 align-text-bottom" />
+          <span className="ml-0.5 inline-block h-4 w-[3px] animate-pulse rounded-full bg-brand-500 align-text-bottom" />
         )}
+
         {!message.streaming && <SourceList sources={message.sources} />}
       </div>
     </div>
