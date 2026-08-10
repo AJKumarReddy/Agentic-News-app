@@ -58,7 +58,13 @@ export default function Sidebar({ refreshKey }: { refreshKey?: number }) {
 
   return (
     <aside className="hidden w-[264px] shrink-0 flex-col bg-brand-950 text-white md:flex">
-      <Link to="/" className="flex items-center gap-2.5 border-b border-white/10 px-5 py-4">
+      {/* the logo returns to the landing screen; without fresh state the
+          route is already "/" and the open conversation would stay mounted */}
+      <Link
+        to="/"
+        state={{ newChat: Date.now() }}
+        className="flex items-center gap-2.5 border-b border-white/10 px-5 py-4 transition-colors hover:bg-white/5"
+      >
         <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-500 text-[15px] font-bold">
           N
         </span>
