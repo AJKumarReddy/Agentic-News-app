@@ -1,17 +1,33 @@
-"""Guardian search with Redis caching — news goes stale, so TTLs are short."""
+"""Multi-source news search.
 
-import hashlib
-import json
+Fans out to every enabled publisher concurrently and interleaves the results
+so no single source dominates the first page. A source that fails or is
+unconfigured is skipped rather than failing the whole request.
+"""
 
-from app.core.config import get_settings
-from app.guardian.client import get_guardian_client
-from app.guardian.models import GuardianSearchResult
-from app.services.cache import cache_get, cache_set
+import asyncio
+import logging
+
+from app.guardian.models import GuardianSearchResult, NormalizedArticle
+from app.sources import enabled_sources
+from app.sources.base import NewsSourceError
+
+logger = logging.getLogger(__name__)
 
 
-def _cache_key(params: dict) -> str:
-    digest = hashlib.sha256(json.dumps(params, sort_keys=True).encode()).hexdigest()[:24]
-    return f"guardian:search:{digest}"
+def interleave(groups: list[list[NormalizedArticle]]) -> list[NormalizedArticle]:
+    """Round-robin merge, preserving each source's own ranking."""
+    merged: list[NormalizedArticle] = []
+    seen: set[str] = set()
+    for row in range(max((len(g) for g in groups), default=0)):
+        for group in groups:
+            if row < len(group):
+                article = group[row]
+                key = article.url or article.article_id
+                if key not in seen:
+                    seen.add(key)
+                    merged.append(article)
+    return merged
 
 
 async def search_news(
@@ -24,26 +40,37 @@ async def search_news(
     order_by: str = "newest",
     page: int = 1,
     page_size: int | None = None,
+    sources: list[str] | None = None,
 ) -> GuardianSearchResult:
-    params = {
-        "q": query, "from": from_date, "to": to_date, "section": section,
-        "tag": tag, "author": author, "order": order_by, "page": page, "size": page_size,
-    }
-    key = _cache_key(params)
-    cached = await cache_get(key)
-    if cached:
-        return GuardianSearchResult.model_validate(cached)
+    active = [s for s in enabled_sources() if not sources or s.id in sources]
+    if not active:
+        return GuardianSearchResult(total=0, page=page, pages=1, page_size=page_size or 12)
 
-    result = await get_guardian_client().search(
-        query=query,
-        from_date=from_date,
-        to_date=to_date,
-        section=section,
-        tag=tag,
-        author=author,
-        order_by=order_by,
+    per_source = max(4, (page_size or 12) // max(1, len(active)) + 2)
+
+    async def run(source):
+        try:
+            return await source.search(
+                query=query,
+                from_date=from_date,
+                to_date=to_date,
+                section=section,
+                order_by=order_by,
+                page=page,
+                page_size=per_source,
+            )
+        except NewsSourceError as exc:
+            logger.warning("source %s failed: %s", source.id, exc)
+            return []
+
+    groups = await asyncio.gather(*(run(source) for source in active))
+    merged = interleave(list(groups))[: page_size or 12]
+
+    return GuardianSearchResult(
+        total=sum(len(g) for g in groups),
         page=page,
-        page_size=page_size,
+        # every source paginates differently; expose a usable page count
+        pages=max(1, page + (1 if any(len(g) >= per_source for g in groups) else 0)),
+        page_size=page_size or 12,
+        articles=merged,
     )
-    await cache_set(key, result.model_dump(mode="json"), ttl=get_settings().cache_ttl_seconds)
-    return result

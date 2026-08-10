@@ -3,6 +3,7 @@ import type {
   ArticleIntelligence,
   ChatStreamEvent,
   ConversationSummary,
+  NewsSourceInfo,
   SearchResponse,
   Source,
 } from '../types';
@@ -28,6 +29,7 @@ const http = axios.create({
 
 export interface SearchParams {
   q?: string;
+  sources?: string;
   from_date?: string;
   to_date?: string;
   section?: string;
@@ -38,6 +40,11 @@ export interface SearchParams {
 
 export async function searchNews(params: SearchParams): Promise<SearchResponse> {
   const { data } = await http.get<SearchResponse>('/news/search', { params });
+  return data;
+}
+
+export async function listSources(): Promise<NewsSourceInfo[]> {
+  const { data } = await http.get<NewsSourceInfo[]>('/news/sources');
   return data;
 }
 

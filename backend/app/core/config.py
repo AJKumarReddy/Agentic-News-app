@@ -12,6 +12,11 @@ class Settings(BaseSettings):
     guardian_api_key: str = ""
     guardian_page_size: int = 20
 
+    # New York Times (Article Search API). Empty key disables the source.
+    nyt_api_key: str = ""
+    # Active publishers, in priority order
+    enabled_sources: str = "guardian,nyt"
+
     # Tavily web search — supplementary sources when Guardian evidence is thin.
     # Empty key disables web search entirely (Guardian-only mode).
     tavily_api_key: str = ""

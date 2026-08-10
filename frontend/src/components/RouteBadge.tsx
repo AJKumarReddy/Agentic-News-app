@@ -7,9 +7,9 @@ const ROUTE_LABELS: Record<string, { label: string; className: string; title: st
     title: 'Answered from the article you are viewing — no search needed',
   },
   NEWS: {
-    label: 'Guardian',
+    label: 'Newsrooms',
     className: 'bg-brand-50 text-brand-700',
-    title: 'Answered from Guardian reporting',
+    title: 'Answered from indexed newsroom reporting',
   },
   WEB: {
     label: 'Web',
@@ -17,9 +17,9 @@ const ROUTE_LABELS: Record<string, { label: string; className: string; title: st
     title: 'Answered from web sources',
   },
   BOTH: {
-    label: 'Guardian + Web',
+    label: 'News + Web',
     className: 'bg-emerald-50 text-emerald-700',
-    title: 'Answered from Guardian reporting plus web sources',
+    title: 'Answered from newsroom reporting plus web sources',
   },
 };
 
@@ -35,13 +35,13 @@ export default function RouteBadge({ routing }: { routing: RouteDecision }) {
         {route.label}
       </span>
       {routing.intent && (
-        <span className="rounded bg-slate-100 px-1.5 py-0.5 font-medium text-slate-600">
+        <span className="rounded bg-ink-100 px-1.5 py-0.5 font-medium text-ink-600">
           {routing.intent.toLowerCase().replace('_', ' ')}
         </span>
       )}
       {rewritten && (
         <span
-          className="truncate text-slate-400"
+          className="truncate text-ink-400"
           title={`Interpreted as: ${rewritten}`}
         >
           understood as “{rewritten.length > 70 ? `${rewritten.slice(0, 70)}…` : rewritten}”

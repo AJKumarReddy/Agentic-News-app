@@ -22,7 +22,10 @@ class NormalizedArticle(BaseModel):
     tags: list[str] = Field(default_factory=list)
     # Guardian editorial desk: UK | US | AUS — used to prioritise an edition
     production_office: str = ""
+    #: display name used in citations
     source: str = "The Guardian"
+    #: machine id of the publisher: "guardian" | "nyt"
+    source_id: str = "guardian"
     retrieved_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     content_hash: str = ""
 

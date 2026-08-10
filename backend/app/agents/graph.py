@@ -42,10 +42,12 @@ RELAX_WINDOW_DAYS = 14
 
 # ── evidence assembly ────────────────────────────────────────────────
 
-def _guardian_source(chunk) -> dict:
+def _publisher_source(chunk) -> dict:
+    """Citation entry for indexed journalism, whichever publisher it came from."""
     return {
-        "type": "guardian",
-        "source": "The Guardian",
+        "type": "publisher",
+        "source": getattr(chunk, "source", "") or "The Guardian",
+        "source_id": getattr(chunk, "source_id", "") or "guardian",
         "article_id": chunk.article_id,
         "headline": chunk.headline,
         "url": chunk.url,
@@ -65,12 +67,12 @@ def _chunks_to_evidence(groups: dict[str, list[ScoredChunk]]) -> tuple[list[dict
             chunk = scored.chunk
             if chunk.article_id not in index:
                 index[chunk.article_id] = len(sources) + 1
-                sources.append({"n": len(sources) + 1, **_guardian_source(chunk)})
+                sources.append({"n": len(sources) + 1, **_publisher_source(chunk)})
             evidence.append(
                 {
                     "n": index[chunk.article_id],
-                    "type": "guardian",
-                    "source": "The Guardian",
+                    "type": "publisher",
+                    "source": getattr(chunk, "source", "") or "The Guardian",
                     "group": group_name,
                     "headline": chunk.headline,
                     "published_at": chunk.published_at.isoformat() if chunk.published_at else "",
@@ -81,7 +83,7 @@ def _chunks_to_evidence(groups: dict[str, list[ScoredChunk]]) -> tuple[list[dict
 
 
 def _web_to_evidence(results, evidence: list[dict], sources: list[dict]):
-    """Append web results after Guardian sources, continuing the numbering."""
+    """Append web results after publisher sources, continuing the numbering."""
     seen = {s["url"] for s in sources}
     for result in results:
         if not result.url or result.url in seen:
@@ -116,7 +118,7 @@ def _web_to_evidence(results, evidence: list[dict], sources: list[dict]):
 
 
 def _format_entry(item: dict, header: str = "") -> str:
-    origin = "The Guardian" if item.get("type") == "guardian" else item.get("source", "web")
+    origin = item.get("source") or ("web" if item.get("type") == "web" else "The Guardian")
     published = (item.get("published_at") or "")[:10]
     return f"{header}[{item['n']}] {item['headline']} ({published}, {origin})\n{item['text']}\n"
 
@@ -130,7 +132,8 @@ def _fill(items: list[dict], budget: int, web_header: bool = False) -> tuple[lis
         if web_header and current_group is None:
             current_group = "web"
             header = (
-                "--- WEB SOURCES (not Guardian journalism; attribute to the named site) ---\n"
+                "--- WEB SOURCES (not from a news publisher we index; "
+                "attribute to the named site) ---\n"
             )
         elif not web_header and item["group"] not in ("default", "article") and item["group"] != current_group:
             current_group = item["group"]
@@ -144,21 +147,21 @@ def _fill(items: list[dict], budget: int, web_header: bool = False) -> tuple[lis
 
 
 def _evidence_block(evidence: list[dict]) -> str:
-    """Guardian and web evidence get separate budgets — a single shared cap
-    let long Guardian chunks starve out every web source before the model
+    """Publisher and web evidence get separate budgets — a single shared cap
+    let long publisher chunks starve out every web source before the model
     ever saw them."""
-    guardian = [e for e in evidence if e.get("type") != "web"]
+    publisher = [e for e in evidence if e.get("type") != "web"]
     web = [e for e in evidence if e.get("type") == "web"]
     if not web:
-        lines, _ = _fill(guardian, MAX_EVIDENCE_CHARS)
+        lines, _ = _fill(publisher, MAX_EVIDENCE_CHARS)
         return "\n".join(lines)
     web_budget = min(
         int(MAX_EVIDENCE_CHARS * WEB_EVIDENCE_SHARE),
         sum(len(_format_entry(e)) for e in web) + 200,
     )
-    guardian_lines, guardian_used = _fill(guardian, MAX_EVIDENCE_CHARS - web_budget)
-    web_lines, _ = _fill(web, MAX_EVIDENCE_CHARS - guardian_used, web_header=True)
-    return "\n".join(guardian_lines + web_lines)
+    publisher_lines, publisher_used = _fill(publisher, MAX_EVIDENCE_CHARS - web_budget)
+    web_lines, _ = _fill(web, MAX_EVIDENCE_CHARS - publisher_used, web_header=True)
+    return "\n".join(publisher_lines + web_lines)
 
 
 def _build_filters(state: AgentState) -> RetrievalFilters:
@@ -212,13 +215,14 @@ def build_agent_graph(session: AsyncSession, understanding_llm=None, synthesis_l
     async def article_evidence_node(state: AgentState) -> dict[str, Any]:
         """The article is known — read it directly. No search, no filters."""
         article_id = state.get("conversation_state", {}).get("active_article_id", "")
-        article = await tools.get_guardian_article(article_id) if article_id else None
+        article = await tools.get_source_article(article_id) if article_id else None
         if article is None:
             return {"evidence": [], "sources": [], **_advance(state, "article_evidence")}
         source = {
             "n": 1,
-            "type": "guardian",
-            "source": "The Guardian",
+            "type": "publisher",
+            "source": article.source,
+            "source_id": article.source_id,
             "article_id": article.article_id,
             "headline": article.headline,
             "url": article.url,

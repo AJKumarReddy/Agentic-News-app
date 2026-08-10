@@ -39,7 +39,9 @@ async def backfill(limit: int = 1000) -> None:
 
     async with SessionFactory() as session:
         result = await session.execute(
-            select(Article.article_id).where(Article.production_office == "").limit(limit)
+            select(Article.article_id)
+            .where(Article.production_office == "", Article.source_id == "guardian")
+            .limit(limit)
         )
         article_ids = [row[0] for row in result.all()]
         if not article_ids:

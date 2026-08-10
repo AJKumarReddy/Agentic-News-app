@@ -4,7 +4,8 @@ topics, dates, related articles)."""
 import logging
 from typing import Any
 
-from app.guardian.client import GuardianAPIError, get_guardian_client
+from app.sources import source_for_article
+from app.sources.base import NewsSourceError
 from app.guardian.models import NormalizedArticle
 from app.llm.client import extract_json, get_chat_model, response_text
 from app.llm.prompts import ARTICLE_INTELLIGENCE_PROMPT
@@ -18,21 +19,28 @@ async def get_article(article_id: str) -> NormalizedArticle:
     cached = await cache_get(key)
     if cached:
         return NormalizedArticle.model_validate(cached)
-    article = await get_guardian_client().get_article(article_id)
+    source = source_for_article(article_id)
+    if source is None:
+        raise NewsSourceError(f"No configured source owns {article_id}", 404)
+    article = await source.get_article(article_id)
+    if article is None:
+        raise NewsSourceError("Article not found", 404)
     await cache_set(key, article.model_dump(mode="json"), ttl=1800)
     return article
 
 
 async def get_related_articles(article: NormalizedArticle, limit: int = 5) -> list[NormalizedArticle]:
     """Related coverage via the article's keyword tags."""
-    if not article.tags:
+    """Related coverage, drawn from every enabled publisher."""
+    topic = article.tags[0] if article.tags else article.headline
+    if not topic:
         return []
     try:
-        result = await get_guardian_client().search(
-            tag=article.tags[0], order_by="newest", page_size=limit + 1
-        )
+        from app.services.search_service import search_news
+
+        result = await search_news(query=topic.split("/")[-1], order_by="newest", page_size=limit + 2)
         return [a for a in result.articles if a.article_id != article.article_id][:limit]
-    except GuardianAPIError:
+    except Exception:  # noqa: BLE001 - related articles are a nicety
         return []
 
 

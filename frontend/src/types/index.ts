@@ -10,6 +10,13 @@ export interface Article {
   body_text?: string;
   tags: string[];
   source: string;
+  source_id?: string;
+}
+
+export interface NewsSourceInfo {
+  id: string;
+  name: string;
+  domain: string;
 }
 
 export interface SearchResponse {
@@ -22,9 +29,11 @@ export interface SearchResponse {
 
 export interface Source {
   n: number;
-  /** "guardian" for Guardian articles, "web" for supplementary web results */
-  type?: 'guardian' | 'web';
-  /** Display name: "The Guardian" or the web source's domain */
+  /** "publisher" for indexed journalism, "web" for supplementary web results */
+  type?: 'publisher' | 'guardian' | 'web';
+  /** Machine id of the publisher: "guardian" | "nyt" */
+  source_id?: string;
+  /** Display name: "The Guardian", "The New York Times", or a web domain */
   source?: string;
   article_id: string;
   headline: string;

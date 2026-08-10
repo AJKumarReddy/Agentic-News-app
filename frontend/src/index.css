@@ -9,51 +9,97 @@ body,
 }
 
 body {
-  @apply bg-slate-50 text-slate-900 antialiased;
+  @apply bg-ink-50 text-ink-900 antialiased;
+  font-feature-settings: 'cv02', 'cv03', 'cv04';
+}
+
+/* thin, unobtrusive scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: theme('colors.ink.300') transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  @apply rounded-full bg-ink-300;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 /* markdown body inside chat bubbles */
+.prose-chat {
+  @apply text-[15px] leading-relaxed text-ink-800;
+}
 .prose-chat h1,
 .prose-chat h2,
 .prose-chat h3 {
-  @apply font-semibold mt-4 mb-2;
+  @apply mt-5 mb-2 font-semibold text-ink-900;
 }
 .prose-chat h2 {
-  @apply text-lg;
+  @apply text-[17px];
 }
 .prose-chat h3 {
-  @apply text-base;
+  @apply text-[15px];
 }
 .prose-chat p {
-  @apply my-2 leading-relaxed;
+  @apply my-2.5;
 }
 .prose-chat ul {
-  @apply list-disc pl-5 my-2 space-y-1;
+  @apply my-2.5 list-disc space-y-1.5 pl-5;
 }
 .prose-chat ol {
-  @apply list-decimal pl-5 my-2 space-y-1;
+  @apply my-2.5 list-decimal space-y-1.5 pl-5;
+}
+.prose-chat li::marker {
+  @apply text-ink-400;
 }
 .prose-chat table {
-  @apply my-3 w-full text-sm border-collapse;
+  @apply my-3 w-full border-collapse overflow-hidden rounded-lg text-sm;
 }
-.prose-chat th,
+.prose-chat th {
+  @apply bg-ink-100 px-3 py-2 text-left font-semibold text-ink-700;
+}
 .prose-chat td {
-  @apply border border-slate-200 px-2 py-1 text-left;
+  @apply border-t border-ink-200 px-3 py-2 align-top;
 }
 .prose-chat a {
-  @apply text-brand-600 underline;
+  @apply text-brand-600 underline decoration-brand-300 underline-offset-2 hover:decoration-brand-600;
 }
 .prose-chat strong {
-  @apply font-semibold;
+  @apply font-semibold text-ink-900;
 }
 .prose-chat code {
-  @apply bg-slate-100 rounded px-1 text-sm;
+  @apply rounded bg-ink-100 px-1.5 py-0.5 text-[13px] text-ink-800;
 }
+.prose-chat blockquote {
+  @apply my-3 border-l-2 border-brand-200 pl-3 text-ink-600;
+}
+
+/* citation chips — publisher vs web are visually distinct so a reader can
+   tell sourced-from-a-newsroom claims from supplementary web sources */
 .citation-badge {
-  @apply inline-flex items-center justify-center text-[11px] font-semibold text-brand-700 bg-brand-100 rounded px-1 mx-0.5 align-super cursor-pointer hover:bg-brand-500 hover:text-white transition-colors;
+  @apply mx-0.5 inline-flex h-[17px] min-w-[17px] cursor-pointer items-center justify-center rounded
+         bg-brand-100 px-1 align-super text-[10px] font-bold text-brand-700 no-underline
+         transition-colors hover:bg-brand-600 hover:text-white;
 }
-/* non-Guardian web citations are visually distinct so readers can tell
-   sourced-from-Guardian claims from supplementary web sources at a glance */
 .citation-badge-web {
-  @apply inline-flex items-center justify-center text-[11px] font-semibold text-amber-700 bg-amber-100 rounded px-1 mx-0.5 align-super cursor-pointer hover:bg-amber-500 hover:text-white transition-colors;
+  @apply mx-0.5 inline-flex h-[17px] min-w-[17px] cursor-pointer items-center justify-center rounded
+         bg-amber-100 px-1 align-super text-[10px] font-bold text-amber-700 no-underline
+         transition-colors hover:bg-amber-500 hover:text-white;
+}
+
+/* skeleton loading */
+.skeleton {
+  @apply rounded bg-ink-200;
+  background-image: linear-gradient(
+    90deg,
+    theme('colors.ink.200') 0px,
+    theme('colors.ink.100') 200px,
+    theme('colors.ink.200') 400px
+  );
+  background-size: 1000px 100%;
+  @apply animate-shimmer;
 }

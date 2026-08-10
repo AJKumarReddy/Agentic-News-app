@@ -16,7 +16,8 @@ from app.core.security import (
     TimeoutMiddleware,
 )
 from app.database.session import engine, init_db
-from app.guardian.client import GuardianAPIError, get_guardian_client
+from app.sources.base import NewsSourceError
+from app.sources.registry import close_all
 
 logger = logging.getLogger(__name__)
 
@@ -26,16 +27,16 @@ async def lifespan(app: FastAPI):
     settings = get_settings()
     configure_logging(settings.log_level)
     await init_db()
-    logger.info("Guardian AI News Assistant backend started (%s)", settings.environment)
+    logger.info("News AI backend started (%s)", settings.environment)
     yield
-    await get_guardian_client().aclose()
+    await close_all()
     await engine.dispose()
 
 
 def create_app() -> FastAPI:
     settings = get_settings()
     app = FastAPI(
-        title="Guardian AI News Assistant",
+        title="News AI",
         version="1.0.0",
         lifespan=lifespan,
         docs_url=None if settings.is_production else "/docs",
@@ -82,11 +83,11 @@ def create_app() -> FastAPI:
         )
         return response
 
-    @app.exception_handler(GuardianAPIError)
-    async def guardian_error_handler(request: Request, exc: GuardianAPIError):
+    @app.exception_handler(NewsSourceError)
+    async def news_source_error_handler(request: Request, exc: NewsSourceError):
         if exc.status_code == 404:
             return JSONResponse(status_code=404, content={"detail": "Article not found"})
-        return JSONResponse(status_code=502, content={"detail": f"Guardian API error: {exc}"})
+        return JSONResponse(status_code=502, content={"detail": f"News source error: {exc}"})
 
     @app.exception_handler(Exception)
     async def unhandled_exception_handler(request: Request, exc: Exception):
