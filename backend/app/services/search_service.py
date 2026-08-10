@@ -1,12 +1,13 @@
 """Multi-source news search.
 
-Fans out to every enabled publisher concurrently and interleaves the results
-so no single source dominates the first page. A source that fails or is
-unconfigured is skipped rather than failing the whole request.
+Fans out to every enabled publisher concurrently and merges the results. A
+source that fails or is unconfigured is skipped rather than failing the whole
+request.
 """
 
 import asyncio
 import logging
+from datetime import datetime, timezone
 
 from app.guardian.models import GuardianSearchResult, NormalizedArticle
 from app.sources import enabled_sources
@@ -18,19 +19,45 @@ logger = logging.getLogger(__name__)
 MAX_PAGES = 50
 
 
-def interleave(groups: list[list[NormalizedArticle]]) -> list[NormalizedArticle]:
-    """Round-robin merge, preserving each source's own ranking."""
+def _dedupe(articles: list[NormalizedArticle]) -> list[NormalizedArticle]:
     merged: list[NormalizedArticle] = []
     seen: set[str] = set()
-    for row in range(max((len(g) for g in groups), default=0)):
-        for group in groups:
-            if row < len(group):
-                article = group[row]
-                key = article.url or article.article_id
-                if key not in seen:
-                    seen.add(key)
-                    merged.append(article)
+    for article in articles:
+        key = article.url or article.article_id
+        if key not in seen:
+            seen.add(key)
+            merged.append(article)
     return merged
+
+
+def _published(article: NormalizedArticle) -> datetime:
+    """Comparable timestamp: publishers differ on whether they send an offset,
+    and mixing naive with aware datetimes raises on comparison."""
+    dt = article.published_at
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+def merge(
+    groups: list[list[NormalizedArticle]], order_by: str = "newest"
+) -> list[NormalizedArticle]:
+    """Combine the sources into one list, deduped.
+
+    Date orders sort across publishers, so the genuinely freshest article leads
+    regardless of who published it. Relevance is the exception: publishers score
+    on their own scales, so those scores can't be compared across sources — a
+    round-robin is the only honest merge, and it keeps each source's ranking.
+    """
+    if order_by == "relevance":
+        rows = max((len(g) for g in groups), default=0)
+        ordered = [g[row] for row in range(rows) for g in groups if row < len(g)]
+        return _dedupe(ordered)
+
+    articles = _dedupe([a for group in groups for a in group])
+    dated = [a for a in articles if a.published_at]
+    undated = [a for a in articles if not a.published_at]
+    dated.sort(key=_published, reverse=order_by != "oldest")
+    # undated last either way: there is no date that legitimately outranks a real one
+    return dated + undated
 
 
 async def search_news(
@@ -49,7 +76,10 @@ async def search_news(
     if not active:
         return GuardianSearchResult(total=0, page=page, pages=1, page_size=page_size or 12)
 
-    per_source = max(4, (page_size or 12) // max(1, len(active)) + 2)
+    # ask each source for a full page: when one publisher happens to own the
+    # freshest N, a per-source share would truncate it out of the ranking.
+    # Costs no extra requests — just a larger page on the same one.
+    per_source = page_size or 12
 
     async def run(source) -> SourceResult:
         try:
@@ -67,7 +97,7 @@ async def search_news(
             return SourceResult()
 
     results = await asyncio.gather(*(run(source) for source in active))
-    merged = interleave([r.articles for r in results])[: page_size or 12]
+    merged = merge([r.articles for r in results], order_by)[: page_size or 12]
 
     # Publishers paginate independently: we can keep serving pages while any
     # of them still has more, so the deepest source sets the page count.
