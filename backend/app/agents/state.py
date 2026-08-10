@@ -39,6 +39,7 @@ class AgentState(TypedDict, total=False):
     articles_indexed: int
     evidence: list[dict[str, Any]]  # reranked chunks as dicts
     sources: list[dict[str, Any]]  # deduplicated citation list
+    relaxed_note: str  # set when date/section filters had to be widened
     answer: str
     steps: list[str]
 

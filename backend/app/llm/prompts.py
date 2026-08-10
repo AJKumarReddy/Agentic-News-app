@@ -32,8 +32,11 @@ def build_synthesis_prompt(
     intent: str,
     conversation_summary: str = "",
     output_format: str = "",
+    coverage_note: str = "",
 ) -> str:
     parts = [f"INTENT GUIDANCE:\n{INTENT_INSTRUCTIONS.get(intent, INTENT_INSTRUCTIONS['TOPIC_SUMMARY'])}"]
+    if coverage_note:
+        parts.append(f"COVERAGE NOTE:\n{coverage_note}")
     if conversation_summary:
         parts.append(f"CONVERSATION CONTEXT:\n{conversation_summary}")
     if evidence_block:
