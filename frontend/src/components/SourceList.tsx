@@ -1,17 +1,5 @@
 import type { Source } from '../types';
-
-function formatDate(iso: string): string {
-  if (!iso) return '';
-  try {
-    return new Date(iso).toLocaleDateString('en-GB', {
-      day: 'numeric',
-      month: 'long',
-      year: 'numeric',
-    });
-  } catch {
-    return iso.slice(0, 10);
-  }
-}
+import { formatArticleDate } from '../utils/date';
 
 export default function SourceList({ sources }: { sources: Source[] }) {
   if (sources.length === 0) return null;
@@ -35,7 +23,7 @@ export default function SourceList({ sources }: { sources: Source[] }) {
               </a>
               <div className="text-xs text-slate-500">
                 The Guardian
-                {source.published_at && <> · {formatDate(source.published_at)}</>}
+                {source.published_at && <> · {formatArticleDate(source.published_at)}</>}
                 {source.author && <> · {source.author}</>}
                 {source.section && <> · {source.section}</>}
               </div>

@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import ArticleCard from '../components/ArticleCard';
 import { getArticleIntelligence } from '../services/api';
 import type { ArticleIntelligence } from '../types';
+import { formatArticleDate } from '../utils/date';
 
 export default function ArticlePage() {
   // splat param: Guardian IDs like technology/2026/aug/07/story contain slashes
@@ -47,14 +48,7 @@ export default function ArticlePage() {
   }
 
   const { article, analysis, related } = intelligence;
-  const published = article.published_at
-    ? new Date(article.published_at).toLocaleDateString('en-GB', {
-        weekday: 'long',
-        day: 'numeric',
-        month: 'long',
-        year: 'numeric',
-      })
-    : '';
+  const published = formatArticleDate(article.published_at, 'full');
 
   return (
     <div className="h-full overflow-y-auto">

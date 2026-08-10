@@ -1,10 +1,14 @@
-from fastapi import APIRouter, HTTPException, Query
+import asyncio
 
-from app.guardian.client import GuardianAPIError
+from fastapi import APIRouter, Query
+
 from app.services.article_service import analyze_article, get_article, get_related_articles
 from app.services.search_service import search_news
 
 router = APIRouter(prefix="/news", tags=["news"])
+
+# GuardianAPIError raised below is translated to 404/502 by the
+# global exception handler in app.main.
 
 
 @router.get("/search")
@@ -19,31 +23,27 @@ async def search(
     page: int = Query(default=1, ge=1, le=100),
     page_size: int = Query(default=12, ge=1, le=50),
 ):
-    try:
-        result = await search_news(
-            query=q,
-            from_date=from_date,
-            to_date=to_date,
-            section=section,
-            tag=tag,
-            author=author,
-            order_by=order_by,
-            page=page,
-            page_size=page_size,
-        )
-    except GuardianAPIError as exc:
-        raise HTTPException(status_code=502, detail=f"Guardian API error: {exc}")
-    return result.model_dump(mode="json")
+    result = await search_news(
+        query=q,
+        from_date=from_date,
+        to_date=to_date,
+        section=section,
+        tag=tag,
+        author=author,
+        order_by=order_by,
+        page=page,
+        page_size=page_size,
+    )
+    # cards never render bodies — don't ship ~100 KB of dead payload per page
+    return result.model_dump(mode="json", exclude={"articles": {"__all__": {"body_text"}}})
 
 
 @router.get("/article/{article_id:path}/intelligence")
 async def article_intelligence(article_id: str):
-    try:
-        article = await get_article(article_id)
-    except GuardianAPIError:
-        raise HTTPException(status_code=404, detail="Article not found")
-    analysis = await analyze_article(article)
-    related = await get_related_articles(article)
+    article = await get_article(article_id)
+    analysis, related = await asyncio.gather(
+        analyze_article(article), get_related_articles(article)
+    )
     return {
         "article": article.model_dump(mode="json", exclude={"body_text"}),
         "analysis": analysis,
@@ -53,8 +53,5 @@ async def article_intelligence(article_id: str):
 
 @router.get("/article/{article_id:path}")
 async def article_detail(article_id: str):
-    try:
-        article = await get_article(article_id)
-    except GuardianAPIError:
-        raise HTTPException(status_code=404, detail="Article not found")
+    article = await get_article(article_id)
     return article.model_dump(mode="json")

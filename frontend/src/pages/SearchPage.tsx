@@ -1,15 +1,17 @@
-import { FormEvent, useCallback, useEffect, useState } from 'react';
+import { FormEvent, useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import ArticleCard from '../components/ArticleCard';
+import { SECTIONS } from '../constants/sections';
 import { searchNews } from '../services/api';
 import type { SearchResponse } from '../types';
 
-const SECTIONS = ['', 'technology', 'politics', 'business', 'world', 'environment', 'science', 'media'];
-
 export default function SearchPage() {
+  // q and section live in the URL (shareable, sidebar links work); the rest is local
   const [searchParams, setSearchParams] = useSearchParams();
-  const [query, setQuery] = useState(searchParams.get('q') ?? '');
-  const [section, setSection] = useState(searchParams.get('section') ?? '');
+  const section = searchParams.get('section') ?? '';
+  const urlQuery = searchParams.get('q') ?? '';
+
+  const [queryInput, setQueryInput] = useState(urlQuery);
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
   const [orderBy, setOrderBy] = useState<'newest' | 'oldest' | 'relevance'>('newest');
@@ -18,43 +20,49 @@ export default function SearchPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  const runSearch = useCallback(
-    async (targetPage = 1) => {
-      setLoading(true);
-      setError('');
-      try {
-        const data = await searchNews({
-          q: query || undefined,
-          section: section || undefined,
-          from_date: fromDate || undefined,
-          to_date: toDate || undefined,
-          order_by: orderBy,
-          page: targetPage,
-          page_size: 12,
-        });
-        setResult(data);
-        setPage(targetPage);
-      } catch {
-        setError('Search failed. The Guardian API may be unavailable — try again shortly.');
-      } finally {
-        setLoading(false);
-      }
-    },
-    [query, section, fromDate, toDate, orderBy],
-  );
+  const runSearch = async (targetPage = 1) => {
+    setLoading(true);
+    setError('');
+    try {
+      const data = await searchNews({
+        q: urlQuery || undefined,
+        section: section || undefined,
+        from_date: fromDate || undefined,
+        to_date: toDate || undefined,
+        order_by: orderBy,
+        page: targetPage,
+        page_size: 12,
+      });
+      setResult(data);
+      setPage(targetPage);
+    } catch {
+      setError('Search failed. The Guardian API may be unavailable — try again shortly.');
+    } finally {
+      setLoading(false);
+    }
+  };
 
-  // Run once on mount / when arriving with ?section=…
+  // Search whenever the URL-owned filters change (initial load, sidebar links, submits)
   useEffect(() => {
-    const urlSection = searchParams.get('section') ?? '';
-    setSection(urlSection);
+    setQueryInput(urlQuery);
     runSearch(1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams.get('section')]);
+  }, [searchParams.toString()]);
+
+  const applyParams = (q: string, s: string) => {
+    const next = new URLSearchParams();
+    if (q) next.set('q', q);
+    if (s) next.set('section', s);
+    if (next.toString() === searchParams.toString()) {
+      runSearch(1); // params unchanged — the effect won't fire, search explicitly
+    } else {
+      setSearchParams(next);
+    }
+  };
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
-    setSearchParams(query ? { q: query, ...(section ? { section } : {}) } : section ? { section } : {});
-    runSearch(1);
+    applyParams(queryInput, section);
   };
 
   return (
@@ -64,19 +72,20 @@ export default function SearchPage() {
 
         <form onSubmit={submit} className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-6">
           <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            value={queryInput}
+            onChange={(e) => setQueryInput(e.target.value)}
             placeholder="Search keywords…"
             className="col-span-2 rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-guardian-500 focus:outline-none md:col-span-2"
           />
           <select
             value={section}
-            onChange={(e) => setSection(e.target.value)}
+            onChange={(e) => applyParams(queryInput, e.target.value)}
             className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
           >
+            <option value="">All sections</option>
             {SECTIONS.map((s) => (
-              <option key={s} value={s}>
-                {s ? s[0].toUpperCase() + s.slice(1) : 'All sections'}
+              <option key={s.id} value={s.id}>
+                {s.label}
               </option>
             ))}
           </select>

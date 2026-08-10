@@ -16,7 +16,7 @@ from app.core.security import (
     TimeoutMiddleware,
 )
 from app.database.session import engine, init_db
-from app.guardian.client import get_guardian_client
+from app.guardian.client import GuardianAPIError, get_guardian_client
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +81,12 @@ def create_app() -> FastAPI:
             total_latency=timer.ms,
         )
         return response
+
+    @app.exception_handler(GuardianAPIError)
+    async def guardian_error_handler(request: Request, exc: GuardianAPIError):
+        if exc.status_code == 404:
+            return JSONResponse(status_code=404, content={"detail": "Article not found"})
+        return JSONResponse(status_code=502, content={"detail": f"Guardian API error: {exc}"})
 
     @app.exception_handler(Exception)
     async def unhandled_exception_handler(request: Request, exc: Exception):

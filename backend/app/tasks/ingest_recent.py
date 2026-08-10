@@ -31,12 +31,18 @@ async def ingest_recent(sections: list[str] | None = None, days_back: int = 1) -
     client = get_guardian_client()
     from_date = (date.today() - timedelta(days=days_back)).isoformat()
 
+    sections = sections or DEFAULT_SECTIONS
+    # fetch all sections concurrently; ingestion shares one session so it stays sequential
+    results = await asyncio.gather(
+        *(
+            client.search(section=section, from_date=from_date, order_by="newest", page_size=20)
+            for section in sections
+        )
+    )
+
     total_indexed = 0
     async with SessionFactory() as session:
-        for section in sections or DEFAULT_SECTIONS:
-            result = await client.search(
-                section=section, from_date=from_date, order_by="newest", page_size=20
-            )
+        for section, result in zip(sections, results):
             stats = await ingest_articles(session, result.articles)
             total_indexed += stats.indexed + stats.updated
             log_event(

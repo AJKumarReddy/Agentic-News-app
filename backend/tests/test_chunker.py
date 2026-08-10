@@ -12,10 +12,9 @@ LONG_TEXT = "\n\n".join(make_paragraph(i) for i in range(30))
 
 
 def test_short_text_single_chunk():
-    chunks = chunk_text("A short article body.", {"article_id": "x"})
+    chunks = chunk_text("A short article body.")
     assert len(chunks) == 1
     assert chunks[0].chunk_index == 0
-    assert chunks[0].metadata["article_id"] == "x"
 
 
 def test_long_text_respects_target_size():
@@ -37,12 +36,6 @@ def test_overlap_carries_content():
     chunks = chunk_text(LONG_TEXT, target_tokens=300, overlap_tokens=150)
     tail_paragraph = chunks[0].text.split("\n\n")[-1]
     assert tail_paragraph in chunks[1].text
-
-
-def test_metadata_propagated_to_all_chunks():
-    metadata = {"article_id": "tech/2026/a", "section": "technology"}
-    chunks = chunk_text(LONG_TEXT, metadata, target_tokens=300)
-    assert all(c.metadata == metadata for c in chunks)
 
 
 def test_oversized_single_paragraph_is_split():

@@ -7,7 +7,7 @@ Rules:
 """
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -29,7 +29,6 @@ class IngestionStats:
     updated: int = 0
     skipped: int = 0
     chunks_created: int = 0
-    indexed_ids: list[str] = field(default_factory=list)
 
 
 def needs_indexing(existing: Article | None, incoming: NormalizedArticle, embedding_model: str) -> bool:
@@ -56,29 +55,43 @@ async def ingest_articles(
     stats = IngestionStats()
 
     with Timer() as timer:
-        for normalized in articles:
-            if not normalized.article_id or not normalized.body_text:
-                continue
-            stats.checked += 1
-            existing = await article_repo.get(normalized.article_id)
+        candidates = [a for a in articles if a.article_id and a.body_text]
+        stats.checked = len(candidates)
 
+        # One query for all existing records instead of one per article
+        existing_map = {
+            a.article_id: a
+            for a in await article_repo.get_many([c.article_id for c in candidates])
+        }
+
+        # Pass 1: decide + chunk everything that needs indexing
+        to_index: list[tuple[NormalizedArticle, bool, list]] = []
+        for normalized in candidates:
+            existing = existing_map.get(normalized.article_id)
             if not needs_indexing(existing, normalized, embedder.model_name):
                 await article_repo.touch_checked(existing)
                 stats.skipped += 1
                 continue
-
-            is_update = existing is not None and existing.first_indexed_at is not None
-            article = await article_repo.upsert(normalized)
-            await chunk_repo.delete_for_article(article.article_id)
-
             pieces = chunk_text(
                 normalized.body_text,
                 target_tokens=settings.chunk_target_tokens,
                 overlap_tokens=settings.chunk_overlap_tokens,
             )
-            if not pieces:
-                continue
-            embeddings = await embedder.embed_texts([p.text for p in pieces])
+            if pieces:
+                is_update = existing is not None and existing.first_indexed_at is not None
+                to_index.append((normalized, is_update, pieces))
+
+        # Pass 2: one batched embeddings call across all articles
+        all_texts = [piece.text for _, _, pieces in to_index for piece in pieces]
+        all_vectors = await embedder.embed_texts(all_texts)
+
+        offset = 0
+        for normalized, is_update, pieces in to_index:
+            vectors = all_vectors[offset : offset + len(pieces)]
+            offset += len(pieces)
+
+            article = await article_repo.upsert(normalized)
+            await chunk_repo.delete_for_article(article.article_id)
             await chunk_repo.add_all(
                 [
                     Chunk(
@@ -93,14 +106,13 @@ async def ingest_articles(
                         url=normalized.url,
                         tags=normalized.tags,
                     )
-                    for piece, vector in zip(pieces, embeddings)
+                    for piece, vector in zip(pieces, vectors)
                 ]
             )
             await article_repo.mark_indexed(
                 article, normalized.content_hash, embedder.model_name, len(pieces)
             )
             stats.chunks_created += len(pieces)
-            stats.indexed_ids.append(article.article_id)
             if is_update:
                 stats.updated += 1
             else:

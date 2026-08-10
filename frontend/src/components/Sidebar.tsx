@@ -1,15 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Link, NavLink, useNavigate } from 'react-router-dom';
+import { SECTIONS } from '../constants/sections';
 import { listConversations } from '../services/api';
 import type { ConversationSummary } from '../types';
-
-const SECTIONS = [
-  { id: 'technology', label: 'Technology' },
-  { id: 'politics', label: 'Politics' },
-  { id: 'business', label: 'Business' },
-  { id: 'world', label: 'World' },
-  { id: 'environment', label: 'Environment' },
-];
 
 export default function Sidebar({ refreshKey }: { refreshKey?: number }) {
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);

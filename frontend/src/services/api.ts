@@ -1,7 +1,6 @@
 import axios from 'axios';
 import type {
   ArticleIntelligence,
-  Article,
   ChatStreamEvent,
   ConversationSummary,
   SearchResponse,
@@ -26,8 +25,6 @@ export interface SearchParams {
   from_date?: string;
   to_date?: string;
   section?: string;
-  tag?: string;
-  author?: string;
   order_by?: 'newest' | 'oldest' | 'relevance';
   page?: number;
   page_size?: number;
@@ -35,11 +32,6 @@ export interface SearchParams {
 
 export async function searchNews(params: SearchParams): Promise<SearchResponse> {
   const { data } = await http.get<SearchResponse>('/news/search', { params });
-  return data;
-}
-
-export async function getArticle(articleId: string): Promise<Article> {
-  const { data } = await http.get<Article>(`/news/article/${articleId}`);
   return data;
 }
 
@@ -106,9 +98,4 @@ export async function streamChat(
       options.onEvent(event);
     }
   }
-}
-
-export async function checkHealth(): Promise<{ status: string }> {
-  const { data } = await http.get('/health');
-  return data;
 }

@@ -41,8 +41,6 @@ class AgentState(TypedDict, total=False):
     sources: list[dict[str, Any]]  # deduplicated citation list
     answer: str
     steps: list[str]
-    iterations: int
-    error: str
 
 
 def default_conversation_state() -> dict[str, Any]:
@@ -79,7 +77,7 @@ def merge_with_previous(
             # Re-use the substantive intent from last turn (e.g. ENTITY_RESEARCH)
             substantive = previous["previous_intent"]
             if substantive not in ("FOLLOW_UP", ""):
-                merged["resolved_intent"] = substantive
+                merged["intent"] = substantive
     if not merged.get("active_article_id"):
         merged["active_article_id"] = previous.get("active_article_id", "")
     return merged

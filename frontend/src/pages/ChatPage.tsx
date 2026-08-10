@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import { useLocation, useSearchParams } from 'react-router-dom';
 import ChatInput from '../components/ChatInput';
 import MessageBubble from '../components/MessageBubble';
@@ -17,7 +17,6 @@ export default function ChatPage({ onConversationChange }: { onConversationChang
     useChat();
   const [searchParams] = useSearchParams();
   const location = useLocation();
-  const [pendingArticleId, setPendingArticleId] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const notifiedRef = useRef<string | null>(null);
 
@@ -41,7 +40,8 @@ export default function ChatPage({ onConversationChange }: { onConversationChang
     if (!state) return;
     if (state.newChat) reset();
     if (state.prefill) {
-      setPendingArticleId(state.articleId ?? null);
+      // articleId travels with the first message; the server persists it as
+      // active_article_id, so follow-up messages don't need to resend it
       send(state.prefill, state.articleId ?? null);
     }
     window.history.replaceState({}, '');
@@ -98,14 +98,7 @@ export default function ChatPage({ onConversationChange }: { onConversationChang
       </div>
       <div className="border-t border-slate-200 bg-slate-50/80 backdrop-blur">
         <div className="mx-auto max-w-3xl px-4 py-4">
-          <ChatInput
-            onSend={(text) => {
-              send(text, pendingArticleId);
-              setPendingArticleId(null);
-            }}
-            busy={busy}
-            onStop={stop}
-          />
+          <ChatInput onSend={send} busy={busy} onStop={stop} />
           <p className="mt-2 text-center text-[11px] text-slate-400">
             Answers are grounded in Guardian reporting with citations. Verify important facts via the
             linked articles.

@@ -52,7 +52,7 @@ def test_follow_up_inherits_previous_slots():
     assert merged["entities"] == ["AMD"]
     assert merged["from_date"] == "2026-08-01"
     assert merged["to_date"] == "2026-08-08"
-    assert merged["resolved_intent"] == "ENTITY_RESEARCH"
+    assert merged["intent"] == "ENTITY_RESEARCH"
 
 
 def test_active_article_carries_over():

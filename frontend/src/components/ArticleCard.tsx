@@ -1,15 +1,10 @@
 import { Link, useNavigate } from 'react-router-dom';
 import type { Article } from '../types';
+import { formatArticleDate } from '../utils/date';
 
 export default function ArticleCard({ article }: { article: Article }) {
   const navigate = useNavigate();
-  const published = article.published_at
-    ? new Date(article.published_at).toLocaleDateString('en-GB', {
-        day: 'numeric',
-        month: 'short',
-        year: 'numeric',
-      })
-    : '';
+  const published = formatArticleDate(article.published_at, 'short');
 
   return (
     <div className="flex flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm transition-shadow hover:shadow-md">
