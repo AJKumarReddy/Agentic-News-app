@@ -185,7 +185,11 @@ If Fargate becomes your only deployment target, delete `.github/workflows/deploy
 
 ## 10. Scheduled ingestion on ECS
 
-Replace the EC2 cron with a scheduled Fargate task:
+Replace the EC2 cron with a scheduled Fargate task. Note the interval: the
+in-process scheduler ticks every 5 minutes but refreshes one section per tick,
+whereas invoking the module directly sweeps **all** sections, so it runs on the
+slower interval to land on the same ~288 requests/day per publisher. Set
+`INGEST_ENABLED=false` on the service tasks so the two don't both ingest.
 
 ```bash
 aws scheduler create-schedule --name guardian-ingest --schedule-expression "rate(30 minutes)" \

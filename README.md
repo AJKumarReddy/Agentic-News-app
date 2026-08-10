@@ -33,7 +33,7 @@ flowchart TB
     B --> AG[LangGraph Agent]
     B --> PG[(PostgreSQL 16 + pgvector<br/>articles · chunks · chats)]
     B --> R[(Redis — cache + locks)]
-    B --> SCH[Scheduler<br/>ingest every 30 min]
+    B --> SCH[Scheduler<br/>1 section every 5 min]
 
     AG --> UN[understand<br/>resolve · route · build queries]
     UN --> SRC[Sources]
@@ -140,7 +140,7 @@ Full list in [.env.example](.env.example). The ones that matter:
 | `TAVILY_API_KEY` | optional web fallback; empty = newsroom-only, no web request ever made |
 | `WEB_SEARCH_THRESHOLD` | newsroom sources at or below this count trigger a web top-up |
 | `DATABASE_URL` · `REDIS_URL` | infrastructure |
-| `INGEST_ENABLED` · `INGEST_INTERVAL_MINUTES` | scheduled pulls (default: on, every 30 min) |
+| `INGEST_ENABLED` · `INGEST_INTERVAL_MINUTES` · `INGEST_SECTIONS_PER_TICK` | scheduled pulls (default: on, one section every 5 min — 288 requests/day, under the 500 cap) |
 | `PREFERRED_PRODUCTION_OFFICE` · `EDITION_BOOST` | Guardian desk to favour (default `US`) |
 | `RAG_INITIAL_TOP_K` · `RAG_FINAL_TOP_K` | retrieval funnel (20 → 6) |
 | `RERANKER` | `llm` (default) · `cohere` · `none` |
@@ -220,14 +220,16 @@ Because NYT chunks are an order of magnitude shorter than full-text ones, **retr
 
 ## Scheduled ingestion
 
-The backend pulls fresh articles **every 30 minutes** while it runs — no cron required.
+The backend pulls fresh articles **every 5 minutes** while it runs — no cron required.
 
 ```bash
-# manual run (also what an external scheduler would call)
+# manual run — sweeps every section, for a cold index or an external scheduler
 docker compose exec backend python -m app.tasks.ingest_recent
 ```
 
-Tune with `INGEST_INTERVAL_MINUTES`, or set `INGEST_ENABLED=false` to drive it externally. Under multiple Gunicorn workers a short-lived **Redis lock** ensures exactly one worker performs each run, so publisher API usage isn't multiplied by the worker count. The lock fails open: a Redis outage still ingests rather than silently freezing the index. A failed run is logged and retried on the next tick.
+A tick refreshes **one section** and cycles through the six, because the request budget is the binding constraint: each section costs one request per publisher and developer keys cap at **500 requests/day**. One section every 5 minutes is 288/day — in budget, with every section current within 30 minutes. Sweeping all six on that interval would be 1,728/day, and the overage fails quietly (a rejected fetch is logged and returns empty, so the index just stops moving). Keep `(1440 / INGEST_INTERVAL_MINUTES) × INGEST_SECTIONS_PER_TICK` under 500 when tuning, or set `INGEST_ENABLED=false` to drive ingestion externally.
+
+Under multiple Gunicorn workers a short-lived **Redis lock** ensures exactly one worker performs each run, so publisher API usage isn't multiplied by the worker count. The rotation is derived from the clock rather than in-process state, so every worker resolves the same slice for a tick and a restart resumes the cycle in place. The lock fails open: a Redis outage still ingests rather than silently freezing the index. A failed run is logged and retried on the next tick.
 
 ## Interface
 
@@ -418,7 +420,7 @@ An AWS-native pipeline (GitHub → CodePipeline → CodeBuild → ECR → ECS Fa
 | Blank page, or "class does not exist" in dev | `tailwind.config.js` changed while the dev server was running — **restart Vite**. If it starts on `:5174`, an orphaned process still holds `:5173`; kill it. |
 | NYT missing from results | Key not licensed for Article Search (401). It falls back to Top Stories; enable "Article Search API" at developer.nytimes.com for archive search. |
 | `"nyt": "unavailable"` in `/api/health` | No `NYT_API_KEY`, or the key is rejected by every endpoint. |
-| Answer says evidence is insufficient | Index may be cold — run `python -m app.tasks.ingest_recent`, or wait for the 30-minute tick. |
+| Answer says evidence is insufficient | Index may be cold — run `python -m app.tasks.ingest_recent`, or wait for the next tick. |
 | Chat returns 500 | Missing `OPENAI_API_KEY`, or Postgres/pgvector not reachable — check `/api/health`. |
 | Frontend can't reach the API | `VITE_API_BASE_URL` mismatch, or the origin isn't in `FRONTEND_URL`/`EXTRA_CORS_ORIGINS`. |
 
