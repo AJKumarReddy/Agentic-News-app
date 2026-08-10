@@ -133,6 +133,8 @@ class NYTSource(NewsSource):
         self._article_search_enabled: bool | None = None
         #: total hits reported by the most recent Article Search call
         self._last_hits: int | None = None
+        #: size of the Top Stories feed behind the most recent fallback
+        self._last_feed_size: int = 0
 
     @property
     def enabled(self) -> bool:
@@ -288,14 +290,19 @@ class NYTSource(NewsSource):
         # "news" and return almost nothing.
         if not query.strip():
             self._last_hits = None
-            return (await self.top_stories(section))[:page_size]
+            feed = await self.top_stories(section)
+            self._last_feed_size = len(feed)
+            # Top Stories has no server-side paging, so page within the feed —
+            # slicing its head every time served the same articles on page 2, 3…
+            start = (max(1, page) - 1) * page_size
+            return feed[start : start + page_size]
 
         # Article Search is the richer endpoint but is not enabled on every
         # key. Fall back to Top Stories (keyword-filtered) rather than
         # dropping NYT from results entirely.
         if self._article_search_enabled is False:
             self._last_hits = None
-            return await self._top_stories_fallback(query, section, page_size)
+            return await self._top_stories_fallback(query, section, page_size, page)
         try:
             return await self._article_search(
                 query, from_date, to_date, section, order_by, page, page_size
@@ -307,11 +314,11 @@ class NYTSource(NewsSource):
                 logger.warning(
                     "NYT Article Search is not enabled for this key; using Top Stories instead"
                 )
-                return await self._top_stories_fallback(query, section, page_size)
+                return await self._top_stories_fallback(query, section, page_size, page)
             raise
 
     async def _top_stories_fallback(
-        self, query: str, section: str | None, page_size: int
+        self, query: str, section: str | None, page_size: int, page: int = 1
     ) -> list[NormalizedArticle]:
         articles = await self.top_stories(section)
         terms = [t for t in query.lower().split() if len(t) > 3]
@@ -319,12 +326,14 @@ class NYTSource(NewsSource):
             scored = [
                 (sum(t in f"{a.headline} {a.trail_text}".lower() for t in terms), a) for a in articles
             ]
-            matches = [a for score, a in sorted(scored, key=lambda p: -p[0]) if score > 0]
-            if matches:
-                return matches[:page_size]
-            # no keyword match: better to contribute nothing than off-topic items
-            return []
-        return articles[:page_size]
+            articles = [a for score, a in sorted(scored, key=lambda p: -p[0]) if score > 0]
+            if not articles:
+                # no keyword match: contribute nothing rather than off-topic items
+                self._last_feed_size = 0
+                return []
+        self._last_feed_size = len(articles)
+        start = (max(1, page) - 1) * page_size
+        return articles[start : start + page_size]
 
     async def _article_search(
         self,
@@ -395,7 +404,9 @@ class NYTSource(NewsSource):
         # no pagination, so it is honestly one page.
         hits = self._last_hits
         if hits is None:
-            return SourceResult(articles=articles, total=len(articles), pages=1 if articles else 0)
+            total = self._last_feed_size or len(articles)
+            pages = max(1, -(-total // page_size)) if total else 0
+            return SourceResult(articles=articles, total=total, pages=pages)
         # NYT serves 10 per request and caps paging at 100 pages
         return SourceResult(articles=articles, total=hits, pages=max(1, min(100, -(-hits // 10))))
 

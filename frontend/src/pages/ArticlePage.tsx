@@ -86,7 +86,7 @@ export default function ArticlePage() {
                   href={passed.url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="rounded-lg bg-brand-gradient px-4 py-2 text-sm font-semibold text-white shadow-glow transition-opacity hover:opacity-90"
+                  className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-brand-700"
                 >
                   Read the full article ↗
                 </a>

@@ -81,7 +81,7 @@ export default function SearchPage() {
   return (
     <div className="h-full overflow-y-auto bg-brand-soft dark:bg-brand-soft-dark">
       <div className="mx-auto max-w-6xl px-4 py-7">
-        <h1 className="gradient-text font-serif text-2xl font-bold">Search the news</h1>
+        <h1 className="font-serif text-2xl font-bold text-ink-900 dark:text-ink-50">Search the news</h1>
         <p className="mt-1 text-sm text-ink-500 dark:text-ink-400 dark:text-ink-500">
           Across {sources.length > 0 ? sources.map((s) => s.name).join(' and ') : 'all newsrooms'}
         </p>
@@ -132,7 +132,7 @@ export default function SearchPage() {
             <button
               type="submit"
               disabled={loading}
-              className="rounded-lg bg-brand-gradient px-4 py-2 text-sm font-semibold text-white shadow-glow transition-opacity hover:opacity-90 disabled:opacity-50"
+              className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-brand-700 disabled:opacity-50"
             >
               Search
             </button>

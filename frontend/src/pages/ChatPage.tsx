@@ -4,6 +4,7 @@ import ChatInput from '../components/ChatInput';
 import MessageBubble from '../components/MessageBubble';
 import { getConversation } from '../services/api';
 import { useChat } from '../hooks/useChat';
+import { LogoMark } from '../components/Logo';
 
 // each prompt gets its own accent so the grid reads as a palette, not a block
 const SUGGESTIONS = [
@@ -84,10 +85,12 @@ export default function ChatPage({ onConversationChange }: { onConversationChang
         <div className="mx-auto max-w-3xl px-4 py-8">
           {empty ? (
             <div className="mt-12 animate-fade-up text-center">
-              <div className="mx-auto mb-5 flex h-12 w-12 items-center justify-center rounded-xl bg-brand-gradient text-xl font-bold text-white shadow-glow">
-                N
+              <div className="mx-auto mb-5 flex h-12 w-12 items-center justify-center rounded-xl border border-ink-200 bg-white text-brand-600 shadow-card dark:border-ink-700 dark:bg-ink-800">
+                <LogoMark className="h-6 w-6" />
               </div>
-              <h1 className="gradient-text font-serif text-[34px] font-bold leading-tight">News AI</h1>
+              <h1 className="font-serif text-[34px] font-bold leading-tight text-ink-900 dark:text-ink-50">
+                News AI
+              </h1>
               <p className="mx-auto mt-2.5 max-w-md text-[15px] leading-relaxed text-ink-600 dark:text-ink-300">
                 Ask anything about the news. Answers are grounded in reporting from The Guardian and
                 The New York Times, with every claim cited.
