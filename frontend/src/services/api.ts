@@ -11,7 +11,15 @@ import { SSEParser } from '../utils/sse';
 
 export const API_BASE: string = import.meta.env.VITE_API_BASE_URL || '/api';
 
-const http = axios.create({ baseURL: API_BASE, timeout: 30000 });
+// Optional shared API key for private deployments (see backend ApiKeyMiddleware).
+// Note: anything bundled into a public SPA is visible to its users.
+const API_KEY: string = import.meta.env.VITE_API_KEY || '';
+
+const http = axios.create({
+  baseURL: API_BASE,
+  timeout: 30000,
+  headers: API_KEY ? { 'X-API-Key': API_KEY } : {},
+});
 
 export interface SearchParams {
   q?: string;
@@ -73,7 +81,10 @@ export async function streamChat(
 ): Promise<void> {
   const response = await fetch(`${API_BASE}/chat`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(API_KEY ? { 'X-API-Key': API_KEY } : {}),
+    },
     signal: options.signal,
     body: JSON.stringify({
       message,

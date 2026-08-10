@@ -257,8 +257,11 @@ Point `@` and `www` A records at the EC2 Elastic IP, issue certs for those names
 ## Security checklist (production)
 
 - [x] API keys server-side only; React never sees them
-- [x] CORS restricted to explicit origins (`FRONTEND_URL` + `EXTRA_CORS_ORIGINS`)
-- [x] Per-IP rate limiting (default 30 req/min) + request size/length validation (Pydantic)
+- [x] Optional `X-API-Key` gate for the whole API (`API_KEY` env; constant-time comparison) for private deployments
+- [x] CORS restricted to explicit origins (`FRONTEND_URL` + `EXTRA_CORS_ORIGINS`); optional Host allowlist (`ALLOWED_HOSTS`)
+- [x] Per-IP rate limiting (30 req/min general, 10 req/min for `/api/chat`) + request size/length validation (Pydantic)
+- [x] Request body size cap (64 KB) and time-to-first-byte timeout (120 s)
+- [x] Content-Security-Policy on both API responses and the SPA (Guardian media allowlisted)
 - [x] Secure headers (nosniff, frame-deny, referrer policy, HSTS at nginx)
 - [x] Guardian/OpenAI calls time-boxed with retries; SSE proxied unbuffered
 - [x] Agent is a bounded graph (recursion limit, capped evidence context, capped tool fan-out)

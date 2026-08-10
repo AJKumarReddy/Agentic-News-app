@@ -8,7 +8,13 @@ from fastapi.responses import JSONResponse
 from app.api import chat, health, news, rag
 from app.core.config import get_settings
 from app.core.logging import Timer, configure_logging, log_event, new_request_id
-from app.core.security import RateLimitMiddleware, SecurityHeadersMiddleware
+from app.core.security import (
+    ApiKeyMiddleware,
+    BodySizeLimitMiddleware,
+    RateLimitMiddleware,
+    SecurityHeadersMiddleware,
+    TimeoutMiddleware,
+)
 from app.database.session import engine, init_db
 from app.guardian.client import get_guardian_client
 
@@ -45,8 +51,20 @@ def create_app() -> FastAPI:
         allow_methods=["GET", "POST", "OPTIONS"],
         allow_headers=["Content-Type", "Authorization"],
     )
+    # Middleware executes in reverse order of registration (last added = innermost)
+    app.add_middleware(TimeoutMiddleware, timeout_seconds=settings.request_timeout_seconds)
+    app.add_middleware(
+        RateLimitMiddleware,
+        limit_per_minute=settings.rate_limit_per_minute,
+        chat_limit_per_minute=settings.chat_rate_limit_per_minute,
+    )
+    app.add_middleware(ApiKeyMiddleware, api_key=settings.api_key)
+    app.add_middleware(BodySizeLimitMiddleware, max_bytes=settings.max_body_bytes)
     app.add_middleware(SecurityHeadersMiddleware)
-    app.add_middleware(RateLimitMiddleware, limit_per_minute=settings.rate_limit_per_minute)
+    if settings.allowed_hosts_list:
+        from starlette.middleware.trustedhost import TrustedHostMiddleware
+
+        app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.allowed_hosts_list)
 
     @app.middleware("http")
     async def request_logging(request: Request, call_next):
