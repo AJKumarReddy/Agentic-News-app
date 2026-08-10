@@ -2,7 +2,7 @@
 
 from app.guardian.client import GuardianAPIError, get_guardian_client
 from app.guardian.models import NormalizedArticle
-from app.sources.base import NewsSource, NewsSourceError
+from app.sources.base import NewsSource, NewsSourceError, SourceResult
 
 
 class GuardianSource(NewsSource):
@@ -46,6 +46,31 @@ class GuardianSource(NewsSource):
         except GuardianAPIError as exc:
             raise NewsSourceError(str(exc), exc.status_code) from exc
         return result.articles
+
+    async def search_page(
+        self,
+        query: str = "",
+        *,
+        from_date: str | None = None,
+        to_date: str | None = None,
+        section: str | None = None,
+        order_by: str = "newest",
+        page: int = 1,
+        page_size: int = 12,
+    ) -> SourceResult:
+        try:
+            result = await self._client.search(
+                query=query,
+                from_date=from_date,
+                to_date=to_date,
+                section=section,
+                order_by=order_by,
+                page=page,
+                page_size=page_size,
+            )
+        except GuardianAPIError as exc:
+            raise NewsSourceError(str(exc), exc.status_code) from exc
+        return SourceResult(articles=result.articles, total=result.total, pages=result.pages)
 
     async def get_article(self, article_id: str) -> NormalizedArticle | None:
         try:

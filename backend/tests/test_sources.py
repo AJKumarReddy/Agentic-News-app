@@ -247,3 +247,57 @@ def test_diversity_never_empties_the_dominant_source():
     candidates = selected + [scored("nyt", 2, 0.1)]
     # a single-chunk answer must keep its best match
     assert ensure_source_diversity(selected, candidates) == selected
+
+
+# ── pagination across publishers ───────────────────────────────────
+
+class StubSource:
+    def __init__(self, source_id: str, result):
+        self.id = source_id
+        self._result = result
+
+    async def search_page(self, **kwargs):
+        return self._result
+
+
+async def test_combined_pages_follow_the_deepest_source(monkeypatch):
+    from app.services import search_service
+    from app.sources.base import SourceResult
+
+    shallow = StubSource("nyt", SourceResult(articles=[article("a", "nyt")], total=8, pages=1))
+    deep = StubSource("guardian", SourceResult(articles=[article("b", "guardian")], total=940, pages=47))
+    monkeypatch.setattr(search_service, "enabled_sources", lambda: [deep, shallow])
+
+    result = await search_service.search_news(query="x", page=1, page_size=12)
+    # paging must continue while any publisher still has more
+    assert result.pages == 47
+    assert result.total == 948
+
+
+async def test_combined_pages_are_capped(monkeypatch):
+    from app.services import search_service
+    from app.sources.base import SourceResult
+
+    huge = StubSource("guardian", SourceResult(articles=[article("a", "guardian")], total=99999, pages=5000))
+    monkeypatch.setattr(search_service, "enabled_sources", lambda: [huge])
+
+    result = await search_service.search_news(query="x")
+    assert result.pages == search_service.MAX_PAGES
+
+
+async def test_a_failing_source_does_not_break_pagination(monkeypatch):
+    from app.services import search_service
+    from app.sources.base import NewsSourceError, SourceResult
+
+    class Failing:
+        id = "nyt"
+
+        async def search_page(self, **kwargs):
+            raise NewsSourceError("down", 502)
+
+    ok = StubSource("guardian", SourceResult(articles=[article("a", "guardian")], total=30, pages=3))
+    monkeypatch.setattr(search_service, "enabled_sources", lambda: [ok, Failing()])
+
+    result = await search_service.search_news(query="x")
+    assert result.pages == 3 and result.total == 30
+    assert [a.source_id for a in result.articles] == ["guardian"]

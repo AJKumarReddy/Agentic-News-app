@@ -22,7 +22,7 @@ from app.core.logging import Timer, log_event
 from app.guardian.models import NormalizedArticle
 from app.guardian.normalizer import content_hash
 from app.services.cache import cache_get, cache_set
-from app.sources.base import NewsSource, NewsSourceError
+from app.sources.base import NewsSource, NewsSourceError, SourceResult
 
 logger = logging.getLogger(__name__)
 
@@ -131,6 +131,8 @@ class NYTSource(NewsSource):
         # NYT enables each API per app. A key may be valid for Top Stories but
         # not Article Search; we detect that once and stop retrying.
         self._article_search_enabled: bool | None = None
+        #: total hits reported by the most recent Article Search call
+        self._last_hits: int | None = None
 
     @property
     def enabled(self) -> bool:
@@ -285,12 +287,14 @@ class NYTSource(NewsSource):
         # for; Article Search would otherwise be asked for the literal word
         # "news" and return almost nothing.
         if not query.strip():
+            self._last_hits = None
             return (await self.top_stories(section))[:page_size]
 
         # Article Search is the richer endpoint but is not enabled on every
         # key. Fall back to Top Stories (keyword-filtered) rather than
         # dropping NYT from results entirely.
         if self._article_search_enabled is False:
+            self._last_hits = None
             return await self._top_stories_fallback(query, section, page_size)
         try:
             return await self._article_search(
@@ -299,6 +303,7 @@ class NYTSource(NewsSource):
         except NewsSourceError as exc:
             if exc.status_code == 401:
                 self._article_search_enabled = False
+                self._last_hits = None
                 logger.warning(
                     "NYT Article Search is not enabled for this key; using Top Stories instead"
                 )
@@ -353,7 +358,10 @@ class NYTSource(NewsSource):
                 "page": max(0, page - 1),
             }
         )
-        docs = ((payload.get("response") or {}).get("docs")) or []
+        response = payload.get("response") or {}
+        docs = response.get("docs") or []
+        meta = response.get("meta") or {}
+        self._last_hits = meta.get("hits") if isinstance(meta.get("hits"), int) else None
         articles = [self._normalize(d) for d in docs if d.get("web_url")][:page_size]
         await cache_set(
             cache_key,
@@ -362,6 +370,34 @@ class NYTSource(NewsSource):
         )
         log_event(logger, "nyt_search", query=query[:80], results=len(articles))
         return articles
+
+    async def search_page(
+        self,
+        query: str = "",
+        *,
+        from_date: str | None = None,
+        to_date: str | None = None,
+        section: str | None = None,
+        order_by: str = "newest",
+        page: int = 1,
+        page_size: int = 12,
+    ) -> SourceResult:
+        articles = await self.search(
+            query,
+            from_date=from_date,
+            to_date=to_date,
+            section=section,
+            order_by=order_by,
+            page=page,
+            page_size=page_size,
+        )
+        # Article Search reports total hits; Top Stories is a single feed with
+        # no pagination, so it is honestly one page.
+        hits = self._last_hits
+        if hits is None:
+            return SourceResult(articles=articles, total=len(articles), pages=1 if articles else 0)
+        # NYT serves 10 per request and caps paging at 100 pages
+        return SourceResult(articles=articles, total=hits, pages=max(1, min(100, -(-hits // 10))))
 
     async def get_article(self, article_id: str) -> NormalizedArticle | None:
         if not self.enabled:

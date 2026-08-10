@@ -6,8 +6,22 @@ one adapter here — nothing downstream changes.
 """
 
 from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
 
 from app.guardian.models import NormalizedArticle
+
+
+@dataclass
+class SourceResult:
+    """One page from a publisher, with what it reports about the whole set.
+
+    total/pages are best effort: publishers cap and estimate differently, so
+    these are only ever used to size pagination, never to claim exact counts.
+    """
+
+    articles: list[NormalizedArticle] = field(default_factory=list)
+    total: int = 0
+    pages: int = 1
 
 
 class NewsSourceError(Exception):
@@ -49,6 +63,30 @@ class NewsSource(ABC):
     @abstractmethod
     def owns(self, article_id: str) -> bool:
         """Whether an article id belongs to this source."""
+
+    async def search_page(
+        self,
+        query: str = "",
+        *,
+        from_date: str | None = None,
+        to_date: str | None = None,
+        section: str | None = None,
+        order_by: str = "newest",
+        page: int = 1,
+        page_size: int = 12,
+    ) -> SourceResult:
+        """Search and report pagination. Sources that know their totals
+        override this; the default reports only what it returned."""
+        articles = await self.search(
+            query,
+            from_date=from_date,
+            to_date=to_date,
+            section=section,
+            order_by=order_by,
+            page=page,
+            page_size=page_size,
+        )
+        return SourceResult(articles=articles, total=len(articles), pages=1 if articles else 0)
 
     async def ping(self) -> bool:
         try:

@@ -10,9 +10,12 @@ import logging
 
 from app.guardian.models import GuardianSearchResult, NormalizedArticle
 from app.sources import enabled_sources
-from app.sources.base import NewsSourceError
+from app.sources.base import NewsSourceError, SourceResult
 
 logger = logging.getLogger(__name__)
+
+# publishers cap paging anyway; keep the UI's range sane
+MAX_PAGES = 50
 
 
 def interleave(groups: list[list[NormalizedArticle]]) -> list[NormalizedArticle]:
@@ -48,9 +51,9 @@ async def search_news(
 
     per_source = max(4, (page_size or 12) // max(1, len(active)) + 2)
 
-    async def run(source):
+    async def run(source) -> SourceResult:
         try:
-            return await source.search(
+            return await source.search_page(
                 query=query,
                 from_date=from_date,
                 to_date=to_date,
@@ -61,16 +64,18 @@ async def search_news(
             )
         except NewsSourceError as exc:
             logger.warning("source %s failed: %s", source.id, exc)
-            return []
+            return SourceResult()
 
-    groups = await asyncio.gather(*(run(source) for source in active))
-    merged = interleave(list(groups))[: page_size or 12]
+    results = await asyncio.gather(*(run(source) for source in active))
+    merged = interleave([r.articles for r in results])[: page_size or 12]
 
+    # Publishers paginate independently: we can keep serving pages while any
+    # of them still has more, so the deepest source sets the page count.
+    pages = max([r.pages for r in results] + [1])
     return GuardianSearchResult(
-        total=sum(len(g) for g in groups),
+        total=sum(r.total for r in results),
         page=page,
-        # every source paginates differently; expose a usable page count
-        pages=max(1, page + (1 if any(len(g) >= per_source for g in groups) else 0)),
+        pages=min(pages, MAX_PAGES),
         page_size=page_size or 12,
         articles=merged,
     )
