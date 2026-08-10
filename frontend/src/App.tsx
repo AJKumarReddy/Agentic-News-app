@@ -8,10 +8,10 @@ import SearchPage from './pages/SearchPage';
 
 export default function App() {
   const [sidebarRefresh, setSidebarRefresh] = useState(0);
-  const { theme, toggle } = useTheme();
+  const { theme, setTheme } = useTheme();
   return (
     <div className="flex h-full">
-      <Sidebar refreshKey={sidebarRefresh} theme={theme} onToggleTheme={toggle} />
+      <Sidebar refreshKey={sidebarRefresh} theme={theme} onSelectTheme={setTheme} />
       <main className="min-w-0 flex-1">
         <Routes>
           <Route
