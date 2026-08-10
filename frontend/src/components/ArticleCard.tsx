@@ -14,7 +14,7 @@ export default function ArticleCard({ article }: { article: Article }) {
   return (
     <article className="group flex flex-col overflow-hidden rounded-xl border border-ink-200 bg-white shadow-card transition-all duration-200 hover:-translate-y-0.5 hover:border-brand-200 hover:shadow-lift">
       {article.thumbnail ? (
-        <Link to={href} className="block overflow-hidden bg-ink-100">
+        <Link to={href} state={{ article }} className="block overflow-hidden bg-ink-100">
           <img
             src={article.thumbnail}
             alt=""
@@ -23,7 +23,7 @@ export default function ArticleCard({ article }: { article: Article }) {
           />
         </Link>
       ) : (
-        <Link to={href} className={`block h-1.5 bg-gradient-to-r ${accentBar}`} />
+        <Link to={href} state={{ article }} className={`block h-1.5 bg-gradient-to-r ${accentBar}`} />
       )}
 
       <div className="flex flex-1 flex-col p-4">
@@ -35,6 +35,7 @@ export default function ArticleCard({ article }: { article: Article }) {
 
         <Link
           to={href}
+          state={{ article }}
           className="font-serif text-[17px] font-bold leading-snug text-ink-900 transition-colors group-hover:text-brand-700"
         >
           {article.headline}
