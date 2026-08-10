@@ -227,7 +227,8 @@ class NYTSource(NewsSource):
     async def top_stories(self, section: str | None = None) -> list[NormalizedArticle]:
         """Current front-page stories. Uses the Top Stories API, which most
         NYT keys have enabled by default."""
-        feed = TOP_SECTION_MAP.get((section or "").lower(), "home")
+        raw = (section or "").lower()
+        feed = TOP_SECTION_MAP.get(raw, raw if raw in set(TOP_SECTION_MAP.values()) else "home")
         cache_key = f"nyt:top:{feed}"
         cached = await cache_get(cache_key)
         if cached is not None:
@@ -347,13 +348,22 @@ class NYTSource(NewsSource):
         cached = await cache_get(cache_key)
         if cached is not None:
             return NormalizedArticle.model_validate(cached)
-        if self._article_search_enabled is False:
-            # without Article Search we can only serve what Top Stories carries
-            for article in await self.top_stories():
-                if article.article_id == article_id:
-                    return article
+        async def from_top_stories() -> NormalizedArticle | None:
+            for feed in ("home", *dict.fromkeys(TOP_SECTION_MAP.values())):
+                for article in await self.top_stories(feed):
+                    if article.article_id == article_id:
+                        return article
             return None
-        payload = await self._throttled_get({"fq": f'_id:("{article_id}")'})
+
+        if self._article_search_enabled is False:
+            return await from_top_stories()
+        try:
+            payload = await self._throttled_get({"fq": f'_id:("{article_id}")'})
+        except NewsSourceError as exc:
+            if exc.status_code == 401:
+                self._article_search_enabled = False
+                return await from_top_stories()
+            raise
         docs = ((payload.get("response") or {}).get("docs")) or []
         if not docs:
             return None
