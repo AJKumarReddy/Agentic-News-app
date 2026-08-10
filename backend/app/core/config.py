@@ -50,6 +50,11 @@ class Settings(BaseSettings):
 
     max_agent_iterations: int = 6
 
+    # Scheduled ingestion: keeps the index current without an external cron
+    ingest_enabled: bool = True
+    ingest_interval_minutes: int = 30
+    ingest_start_delay_seconds: int = 60
+
     # Security layer
     rate_limit_per_minute: int = 30
     chat_rate_limit_per_minute: int = 10
