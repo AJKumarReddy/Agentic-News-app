@@ -1,6 +1,8 @@
-# Guardian AI News Assistant
+# Agentic News App — Guardian AI News Assistant
 
 A production-ready AI news research application built on the [Guardian Open Platform](https://open-platform.theguardian.com/). It combines live Guardian search, a RAG pipeline over indexed articles, and a controlled LangGraph agent to answer natural-language questions with **grounded, citation-backed answers** — including summaries, comparisons, timelines, and follow-up questions.
+
+**Repository:** https://github.com/AJKumarReddy/Agentic-News-app
 
 ```
 React + TypeScript + Vite + Tailwind   →   FastAPI + LangGraph + pgvector   →   Guardian API + OpenAI
@@ -55,11 +57,13 @@ flowchart TB
 │   │   ├── services/  chat orchestration/SSE, search cache, article intelligence
 │   │   ├── tasks/     scheduled ingestion job
 │   │   └── core/      config, JSON logging, security middleware
-│   ├── tests/         pytest suite (56 tests)
+│   ├── tests/         pytest suite (64 tests)
 │   └── evaluation/    20-question RAG evaluation harness
-├── nginx/             production reverse-proxy config
+├── nginx/             production reverse-proxy config (EC2 path)
+├── aws/               ECS Fargate task definitions + CodePipeline guide
 ├── scripts/           setup-ec2.sh, deploy.sh, health-check.sh
 ├── .github/workflows/ test.yml, deploy.yml (CI/CD to EC2)
+├── buildspec.yml      AWS CodeBuild spec (CodePipeline path)
 ├── docker-compose.yml postgres + redis + backend + frontend (+ nginx/certbot via --profile prod)
 └── .env.example
 ```
@@ -69,6 +73,8 @@ flowchart TB
 Prerequisites: Docker Desktop, a [Guardian API key](https://open-platform.theguardian.com/access/) (free), an OpenAI API key.
 
 ```bash
+git clone https://github.com/AJKumarReddy/Agentic-News-app.git
+cd Agentic-News-app
 cp .env.example .env        # then fill in GUARDIAN_API_KEY and OPENAI_API_KEY
 docker compose up -d --build
 ```
@@ -83,7 +89,7 @@ Frontend dev server: `cd frontend && npm install && npm run dev` (proxies `/api`
 ### Tests
 
 ```bash
-cd backend && pytest -q          # 56 tests: Guardian client, chunking, dedup, retrieval fusion, reranking, router, API
+cd backend && pytest -q          # 64 tests: Guardian client, chunking, dedup, retrieval fusion, reranking, router, API, security middleware
 cd frontend && npm test          # vitest: SSE parser, citation components
 ```
 
@@ -122,8 +128,13 @@ See [.env.example](.env.example). Highlights:
 | `RAG_INITIAL_TOP_K` / `RAG_FINAL_TOP_K` | retrieval funnel (default 20 → 6) |
 | `RERANKER` | `llm` (default), `cohere`, or `none` |
 | `VITE_API_BASE_URL` | build-time API base for the React bundle |
+| `API_KEY` / `VITE_API_KEY` | optional shared-secret gate for private deployments (`X-API-Key` header) |
+| `RATE_LIMIT_PER_MINUTE` / `CHAT_RATE_LIMIT_PER_MINUTE` | per-IP budgets (30 general / 10 for chat) |
+| `ALLOWED_HOSTS`, `MAX_BODY_BYTES`, `REQUEST_TIMEOUT_SECONDS` | host allowlist, body cap (64 KB), time-to-first-byte cap (120 s) |
 
 ## Git & GitHub setup
+
+This repository lives at `https://github.com/AJKumarReddy/Agentic-News-app`. To recreate the setup from scratch (e.g. for a fork):
 
 ```bash
 git init
