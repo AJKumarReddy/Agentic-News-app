@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents import tools
 from app.agents.dateparse import clean_search_query
+from app.agents.decision import decide_source
 from app.agents.router import classify
 from app.agents.state import AgentState
 from app.core.config import get_settings
@@ -93,6 +94,8 @@ def _chunks_to_evidence(groups: dict[str, list[ScoredChunk]]) -> tuple[list[dict
                 sources.append(
                     {
                         "n": len(sources) + 1,
+                        "type": "guardian",
+                        "source": "The Guardian",
                         "article_id": chunk.article_id,
                         "headline": chunk.headline,
                         "url": chunk.url,
@@ -104,6 +107,8 @@ def _chunks_to_evidence(groups: dict[str, list[ScoredChunk]]) -> tuple[list[dict
             evidence.append(
                 {
                     "n": source_index[chunk.article_id],
+                    "type": "guardian",
+                    "source": "The Guardian",
                     "group": group_name,
                     "article_id": chunk.article_id,
                     "headline": chunk.headline,
@@ -116,18 +121,67 @@ def _chunks_to_evidence(groups: dict[str, list[ScoredChunk]]) -> tuple[list[dict
     return evidence, sources
 
 
+def _web_to_evidence(
+    results: list, evidence: list[dict], sources: list[dict]
+) -> tuple[list[dict], list[dict]]:
+    """Append web results after the Guardian sources, continuing the citation
+    numbering. Web entries are explicitly typed so the model and the UI can
+    never present them as Guardian journalism."""
+    seen_urls = {s["url"] for s in sources}
+    for result in results:
+        if not result.url or result.url in seen_urls:
+            continue
+        seen_urls.add(result.url)
+        number = len(sources) + 1
+        sources.append(
+            {
+                "n": number,
+                "type": "web",
+                "source": result.source or "web",
+                "article_id": "",
+                "headline": result.title,
+                "url": result.url,
+                "published_at": result.published_date or "",
+                "section": "",
+                "author": "",
+            }
+        )
+        evidence.append(
+            {
+                "n": number,
+                "type": "web",
+                "source": result.source or "web",
+                "group": "web",
+                "article_id": "",
+                "headline": result.title,
+                "published_at": result.published_date or "",
+                "section": "",
+                "text": result.content,
+                "score": result.score,
+            }
+        )
+    return evidence, sources
+
+
 def _evidence_block(evidence: list[dict]) -> str:
     lines: list[str] = []
     used = 0
     current_group = None
     for item in evidence:
         header = ""
-        if item["group"] != "default" and item["group"] != current_group:
+        if item["group"] == "web" and current_group != "web":
+            current_group = "web"
+            header = (
+                "--- NON-GUARDIAN WEB SOURCES (supplementary; attribute to the "
+                "named site, never to The Guardian) ---\n"
+            )
+        elif item["group"] not in ("default", "web") and item["group"] != current_group:
             current_group = item["group"]
             header = f"--- Evidence about: {current_group} ---\n"
+        origin = "The Guardian" if item.get("type") == "guardian" else item.get("source", "web")
         entry = (
             f"{header}[{item['n']}] {item['headline']} "
-            f"({item['published_at'][:10]}, {item['section']})\n{item['text']}\n"
+            f"({item['published_at'][:10]}, {origin})\n{item['text']}\n"
         )
         if used + len(entry) > MAX_EVIDENCE_CHARS:
             break
@@ -159,6 +213,36 @@ def build_agent_graph(session: AsyncSession, router_llm=None, synthesis_llm=None
             "output_format": result.get("output_format", ""),
             "search_queries": queries[:3],
             **_advance(state, "classify"),
+        }
+
+    async def decide_source_node(state: AgentState) -> dict[str, Any]:
+        """Decision agent: Guardian, web, or both."""
+        llm = router_llm
+        if llm is None and settings.openai_api_key:
+            llm = get_chat_model(temperature=0, max_tokens=200)
+        decision = await decide_source(
+            state["query"], llm=llm, web_available=bool(settings.tavily_api_key)
+        )
+        return {
+            "evidence_plan": decision["plan"],
+            "web_query": decision.get("web_query", ""),
+            **_advance(state, "decide_source"),
+        }
+
+    async def web_search_node(state: AgentState) -> dict[str, Any]:
+        """Supplementary web evidence, appended after any Guardian sources."""
+        query = state.get("web_query") or state["query"]
+        results = await tools.search_web(
+            query, days=30 if state.get("freshness") else None
+        )
+        evidence, sources = _web_to_evidence(
+            results, list(state.get("evidence", [])), list(state.get("sources", []))
+        )
+        return {
+            "evidence": evidence,
+            "sources": sources,
+            "web_used": bool(results),
+            **_advance(state, "web_search"),
         }
 
     async def fetch_fresh_node(state: AgentState) -> dict[str, Any]:
@@ -257,6 +341,7 @@ def build_agent_graph(session: AsyncSession, router_llm=None, synthesis_llm=None
             conversation_summary=state.get("conversation_summary", ""),
             output_format=state.get("output_format", ""),
             coverage_note=state.get("relaxed_note", ""),
+            has_web_sources=bool(state.get("web_used")),
         )
         llm = synthesis_llm or get_chat_model(temperature=0.2, streaming=True, max_tokens=1800)
         response = await llm.ainvoke(
@@ -280,18 +365,43 @@ def build_agent_graph(session: AsyncSession, router_llm=None, synthesis_llm=None
             **_advance(state, "synthesize"),
         }
 
+    def route_after_decision(state: AgentState) -> str:
+        """WEB-only questions skip Guardian retrieval entirely."""
+        if state.get("evidence_plan") == "WEB":
+            return "web_search"
+        return route_after_classify(state)
+
+    def route_after_retrieve(state: AgentState) -> str:
+        """Top up with web sources when the plan asked for them, or when
+        Guardian evidence came back too thin to answer on."""
+        if not settings.tavily_api_key:
+            return "synthesize"
+        if state.get("evidence_plan") == "BOTH":
+            return "web_search"
+        if len(state.get("sources", [])) <= settings.web_search_threshold:
+            return "web_search"
+        return "synthesize"
+
     graph = StateGraph(AgentState)
     graph.add_node("classify", classify_node)
+    graph.add_node("decide_source", decide_source_node)
     graph.add_node("fetch_fresh", fetch_fresh_node)
     graph.add_node("retrieve", retrieve_node)
+    graph.add_node("web_search", web_search_node)
     graph.add_node("synthesize", synthesize_node)
 
     graph.set_entry_point("classify")
+    graph.add_edge("classify", "decide_source")
     graph.add_conditional_edges(
-        "classify", route_after_classify, {"fetch_fresh": "fetch_fresh", "retrieve": "retrieve"}
+        "decide_source",
+        route_after_decision,
+        {"fetch_fresh": "fetch_fresh", "retrieve": "retrieve", "web_search": "web_search"},
     )
     graph.add_edge("fetch_fresh", "retrieve")
-    graph.add_edge("retrieve", "synthesize")
+    graph.add_conditional_edges(
+        "retrieve", route_after_retrieve, {"web_search": "web_search", "synthesize": "synthesize"}
+    )
+    graph.add_edge("web_search", "synthesize")
     graph.add_edge("synthesize", END)
     return graph.compile()
 

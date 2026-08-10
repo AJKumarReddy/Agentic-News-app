@@ -17,14 +17,15 @@ export default function Markdown({ content, sources }: { content: string; source
       if (match) {
         const source = bySourceNumber.get(Number(match[1]));
         if (source) {
+          const isWeb = source.type === 'web';
           return (
             <a
               key={i}
               href={source.url}
               target="_blank"
               rel="noopener noreferrer"
-              className="citation-badge"
-              title={source.headline}
+              className={isWeb ? 'citation-badge-web' : 'citation-badge'}
+              title={`${isWeb ? source.source || 'Web' : 'The Guardian'}: ${source.headline}`}
             >
               {match[1]}
             </a>
