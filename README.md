@@ -1,116 +1,162 @@
-# Guardian News AI
+# News AI
 
-A production-ready AI news research application built on the [Guardian Open Platform](https://open-platform.theguardian.com/). It combines live Guardian search, a RAG pipeline over indexed articles, and a controlled LangGraph agent to answer natural-language questions with **grounded, citation-backed answers** — including summaries, comparisons, timelines, and follow-up questions.
+A production-ready AI news research assistant. It searches live reporting from **The Guardian** and **The New York Times**, indexes it into a vector store, and answers natural-language questions with **grounded, citation-backed answers** — summaries, comparisons, timelines and follow-ups — falling back to the open web only when the newsrooms can't answer.
 
 **Repository:** https://github.com/AJKumarReddy/Agentic-News-app
 
 ```
-React + TypeScript + Vite + Tailwind   →   FastAPI + LangGraph + pgvector   →   Guardian API + OpenAI
+React + TypeScript + Vite + Tailwind  →  FastAPI + LangGraph + pgvector  →  Guardian · NYT · Tavily · OpenAI
 ```
+
+---
+
+## Contents
+
+- [Architecture](#architecture) · [Design decisions](#key-design-decisions)
+- [Quick start](#quick-start-local) · [Configuration](#configuration)
+- [How it works](#how-it-works): [routing](#1-routing--the-understand-step) · [RAG](#2-the-rag-pipeline) · [citations](#3-citation-integrity)
+- [News sources](#news-sources) · [Scheduled ingestion](#scheduled-ingestion)
+- [Interface](#interface) · [API](#backend-api) · [Testing](#testing)
+- [Deployment](#deployment): [Docker](#docker-compose) · [EC2](#aws-ec2-step-by-step) · [Hostinger](#hostinger-domain--frontend-hosting) · [ECS Fargate](#alternative-codepipeline--ecr--ecs-fargate)
+- [Security checklist](#security-checklist-production) · [Troubleshooting](#troubleshooting)
+
+---
 
 ## Architecture
 
 ```mermaid
 flowchart TB
-    U[User Browser] --> H[Hostinger Domain / DNS]
-    H --> F[React Frontend<br/>Vite + Tailwind]
-    F -- HTTPS REST + SSE --> N[Nginx on AWS EC2]
-    N --> B[FastAPI Backend<br/>Gunicorn + Uvicorn, Docker]
+    U[User Browser] --> F[React Frontend<br/>Vite · Tailwind · light/dark]
+    F -- HTTPS REST + SSE --> N[Nginx]
+    N --> B[FastAPI<br/>Gunicorn + Uvicorn · Docker]
 
-    B --> AG[LangGraph Agent<br/>understand → mode → evidence → synthesis]
-    B --> PG[(PostgreSQL 16<br/>+ pgvector)]
-    B --> R[(Redis cache)]
+    B --> AG[LangGraph Agent]
+    B --> PG[(PostgreSQL 16 + pgvector<br/>articles · chunks · chats)]
+    B --> R[(Redis — cache + locks)]
+    B --> SCH[Scheduler<br/>ingest every 30 min]
 
-    AG --> G[Guardian Content API]
-    AG --> RAG[RAG Engine]
-    RAG --> CH[Chunker 600–1000 tok]
-    RAG --> EM[OpenAI Embeddings]
-    AG --> W[Tavily Web Search<br/>gated, cited separately]
-    RAG --> HY[Hybrid Retrieval<br/>vector + keyword + recency + edition]
+    AG --> UN[understand<br/>resolve · route · build queries]
+    UN --> SRC[Sources]
+    SRC --> G[Guardian Content API]
+    SRC --> NY[NY Times API]
+    UN --> WEB[Tavily web search<br/>gated · cited separately]
+
+    SRC --> RAG[RAG Engine]
+    RAG --> CH[Chunk 600–1000 tok]
+    RAG --> EM[OpenAI embeddings]
+    RAG --> HY[Hybrid retrieval<br/>vector + keyword + recency + edition]
     HY --> PG
-    HY --> RR[Reranker<br/>LLM / Cohere / none]
-    RR --> LLM[OpenAI Chat Model]
-    LLM --> C[Cited Answer<br/>real Guardian URLs]
+    HY --> RR[Rerank + source diversity]
+    RR --> LLM[OpenAI chat model]
+    WEB --> LLM
+    LLM --> C[Cited answer<br/>real publisher URLs]
 ```
 
-**Key design decisions**
+## Key design decisions
 
 | Decision | Choice | Why |
 |---|---|---|
-| Vector DB | **PostgreSQL + pgvector** | One database serves relational data *and* vectors — simplest, cheapest, transactional on a single EC2 instance. The `vector_store.py` interface is small enough to swap for Qdrant later if scale demands it. |
-| Agent | **LangGraph controlled graph, four modes** | `understand` resolves the message into a standalone question and routes to ARTICLE / NEWS / WEB / BOTH. Each mode does only its own work — an article question never touches the search machinery. Bounded, debuggable, no runaway autonomy. |
-| Query resolution | **Resolve before searching** | Follow-ups ("search youtube for related news", "then do a google search") are rewritten against the conversation first. Searching raw words was the single largest source of wrong results. |
-| Web fallback | **Tavily, gated** | Web results exclude Guardian domains, must pass relevance/recency/domain gates, and are cited separately so they can never be mistaken for Guardian journalism. Disabled entirely when `TAVILY_API_KEY` is unset. |
-| Edition | **US desk preferred** | `productionOffice` is stored per article and boosts ranking (`PREFERRED_PRODUCTION_OFFICE=US`). A nudge, not a filter — better UK/AUS matches still win. |
-| Freshness | Guardian-API-first for "latest/today/this week" queries | A "latest news" question is answered from *current* Guardian results (indexed on the fly), never from stale vectors with high semantic scores. |
-| Dedup | Guardian article ID + SHA-256 content hash | An article is embedded once; re-embedding happens only if content or the embedding model changed. |
-| Streaming | Server-Sent Events | Pipeline status events + token streaming into the React UI. |
+| Vector DB | **PostgreSQL + pgvector** | One database serves relational data *and* vectors — simplest, cheapest and transactional on a single instance. `rag/vector_store.py` is small enough to swap for Qdrant if scale demands it. |
+| Agent | **LangGraph, four modes** | `understand` resolves the message, then routes to ARTICLE / NEWS / WEB / BOTH. Each mode does only its own work, so an article question never touches the search machinery. Bounded and debuggable — no runaway autonomy. |
+| Query resolution | **Resolve before searching** | Follow-ups ("search youtube for related news", "now do a google search") are rewritten against the conversation *first*. Searching the raw words was the single largest source of wrong answers. |
+| Multi-source | **Adapter per publisher** | Every source returns the same `NormalizedArticle`, so retrieval, chunking, citations and the UI are source-agnostic. Adding a newsroom is one adapter. |
+| Fair ranking | **Per-source retrieval** | Publishers expose wildly different text lengths (NYT gives abstracts only). A shared candidate pool silently excluded NYT entirely, so retrieval runs per source and merges. |
+| Web fallback | **Tavily, gated** | Results exclude our own publishers' domains, must pass relevance/recency/low-signal-domain gates, and are cited separately. Disabled entirely without `TAVILY_API_KEY`. |
+| Edition | **US desk preferred** | Guardian `productionOffice` is stored per article and nudges ranking. A nudge, not a filter — a better UK/AUS match still wins. |
+| Freshness | **API-first for "latest/today"** | Recency questions are answered from *current* API results indexed on the fly, never from stale vectors with high semantic scores. |
+| Dedup | **Article ID + SHA-256 content hash** | An article is embedded once; re-embedding only when content or the embedding model changes. |
+| Streaming | **Server-Sent Events** | Route decision, pipeline status and answer tokens stream into the UI. |
 
 ## Repository layout
 
 ```
-├── frontend/          React + TS + Vite + Tailwind (chat, search, article intelligence)
+├── frontend/               React + TS + Vite + Tailwind
+│   └── src/
+│       ├── components/     Sidebar, chat, cards, citations, theme toggle
+│       ├── pages/          Chat · Search · Article intelligence
+│       ├── hooks/          useChat (SSE), useTheme
+│       ├── services/       API client
+│       └── constants/      section taxonomy
 ├── backend/
 │   ├── app/
-│   │   ├── api/       chat, news, rag, health routers
-│   │   ├── agents/    LangGraph graph, understanding/routing, date parsing, tools
-│   │   ├── guardian/  Guardian API client + normalizer
-│   │   ├── rag/       chunker, embeddings, vector store, retrieval, reranker, ingestion
-│   │   ├── database/  SQLAlchemy models, session, repositories
-│   │   ├── llm/       chat model factory, prompts (grounding rules)
-│   │   ├── services/  chat orchestration/SSE, search cache, article intelligence
-│   │   ├── tasks/     scheduled ingestion, edition backfill
-│   │   ├── websearch/ Tavily client + quality gates
-│   │   └── core/      config, JSON logging, security middleware
-│   ├── tests/         pytest suite (86 tests)
-│   └── evaluation/    20-question RAG evaluation harness
-├── nginx/             production reverse-proxy config (EC2 path)
-├── aws/               ECS Fargate task definitions + CodePipeline guide
-├── scripts/           setup-ec2.sh, deploy.sh, health-check.sh
-├── .github/workflows/ test.yml, deploy.yml (CI/CD to EC2)
-├── buildspec.yml      AWS CodeBuild spec (CodePipeline path)
-├── docker-compose.yml postgres + redis + backend + frontend (+ nginx/certbot via --profile prod)
+│   │   ├── api/            chat · news · rag · health routers
+│   │   ├── agents/         graph, understand (resolve+route), dateparse, tools
+│   │   ├── sources/        NewsSource abstraction · Guardian · NYT · registry
+│   │   ├── guardian/       Guardian client, normalizer, shared models
+│   │   ├── websearch/      Tavily client + quality gates
+│   │   ├── rag/            chunker · embeddings · vector store · retrieval · reranker · ingestion
+│   │   ├── database/       SQLAlchemy models, session, repositories
+│   │   ├── llm/            chat model factory, prompts (grounding rules)
+│   │   ├── services/       chat orchestration/SSE, search, article intelligence, cache
+│   │   ├── tasks/          scheduler, ingest_recent, edition backfill
+│   │   └── core/           config, JSON logging, security middleware
+│   ├── tests/              110 tests
+│   └── evaluation/         20-question RAG evaluation harness
+├── nginx/                  production reverse proxy (EC2 path)
+├── aws/                    ECS Fargate task definitions + CodePipeline guide
+├── scripts/                setup-ec2.sh · deploy.sh · health-check.sh
+├── .github/workflows/      test.yml · deploy.yml
+├── buildspec.yml           AWS CodeBuild spec
+├── docker-compose.yml      postgres · redis · backend · frontend (+ nginx/certbot via --profile prod)
 └── .env.example
 ```
 
 ## Quick start (local)
 
-Prerequisites: Docker Desktop, a [Guardian API key](https://open-platform.theguardian.com/access/) (free), an OpenAI API key.
+Prerequisites: Docker Desktop, plus API keys — [Guardian](https://open-platform.theguardian.com/access/) (free), [OpenAI](https://platform.openai.com/), optionally [NYT](https://developer.nytimes.com/) and [Tavily](https://tavily.com) (both free tiers).
 
 ```bash
 git clone https://github.com/AJKumarReddy/Agentic-News-app.git
 cd Agentic-News-app
-cp .env.example .env        # then fill in GUARDIAN_API_KEY and OPENAI_API_KEY
+cp .env.example .env        # fill in the keys
 docker compose up -d --build
 ```
 
 - Frontend: http://localhost:3000
-- API: http://localhost:8000/api/health
+- API health: http://localhost:8000/api/health
 - API docs (dev only): http://localhost:8000/docs
 
-Without Docker (backend): `cd backend && python -m venv .venv && .venv/Scripts/pip install -r requirements.txt -r requirements-dev.txt && .venv/Scripts/uvicorn app.main:app --reload` (needs local Postgres with pgvector — easiest is `docker compose up -d postgres redis`, with `DATABASE_URL` pointing at `localhost`).
-Frontend dev server: `cd frontend && npm install && npm run dev` (proxies `/api` to `:8000`).
-
-### Tests
+**Without Docker** — run Postgres and Redis in containers, everything else on the host:
 
 ```bash
-cd backend && pytest -q          # 86 tests: Guardian client, chunking, dedup, retrieval fusion, edition boost, reranking, routing, API, security
-cd frontend && npm test          # vitest: SSE parser, citation components
+docker compose up -d postgres redis          # DATABASE_URL/REDIS_URL → localhost
+cd backend && python -m venv .venv
+.venv/Scripts/pip install -r requirements.txt -r requirements-dev.txt
+.venv/Scripts/uvicorn app.main:app --reload  # :8000
+cd ../frontend && npm install && npm run dev # :5173, proxies /api
 ```
 
-### RAG evaluation (20 questions)
+> Changing `tailwind.config.js` requires a **dev-server restart** — Vite hot-reloads CSS but not that config, and a stale config shows up as "class does not exist" or a blank page.
 
-With the stack running and real API keys:
+## Configuration
 
-```bash
-cd backend && python evaluation/run_eval.py --base-url http://localhost:8000
-```
+Full list in [.env.example](.env.example). The ones that matter:
 
-Checks citation presence, real `theguardian.com` URLs, honest refusals on unsupported questions (anti-hallucination), intent routing, and follow-up context retention.
+| Variable | Purpose |
+|---|---|
+| `GUARDIAN_API_KEY` · `NYT_API_KEY` | publishers; a source with no key is skipped, so the app runs on whichever keys exist |
+| `ENABLED_SOURCES` | active publishers in priority order (`guardian,nyt`) |
+| `OPENAI_API_KEY` · `CHAT_MODEL` · `EMBEDDING_MODEL` | generation and embeddings |
+| `TAVILY_API_KEY` | optional web fallback; empty = newsroom-only, no web request ever made |
+| `WEB_SEARCH_THRESHOLD` | newsroom sources at or below this count trigger a web top-up |
+| `DATABASE_URL` · `REDIS_URL` | infrastructure |
+| `INGEST_ENABLED` · `INGEST_INTERVAL_MINUTES` | scheduled pulls (default: on, every 30 min) |
+| `PREFERRED_PRODUCTION_OFFICE` · `EDITION_BOOST` | Guardian desk to favour (default `US`) |
+| `RAG_INITIAL_TOP_K` · `RAG_FINAL_TOP_K` | retrieval funnel (20 → 6) |
+| `RERANKER` | `llm` (default) · `cohere` · `none` |
+| `FRONTEND_URL` · `EXTRA_CORS_ORIGINS` | CORS allowlist — never `*` in production |
+| `API_KEY` · `VITE_API_KEY` | optional `X-API-Key` gate for private deployments |
+| `RATE_LIMIT_PER_MINUTE` · `CHAT_RATE_LIMIT_PER_MINUTE` | per-IP budgets (30 / 10) |
 
-## The routing agent: Guardian, the web, or both
+**Never commit** `.env`, API keys, database passwords, AWS credentials or SSH keys — all covered by [.gitignore](.gitignore).
 
-One `understand` step resolves the message and routes it. Inspect its decision without spending a chat turn:
+---
+
+## How it works
+
+### 1. Routing — the `understand` step
+
+One LLM call resolves the message *and* routes it. Inspect its decision without spending a chat turn:
 
 ```bash
 curl -X POST http://localhost:8000/api/intent -H "Content-Type: application/json" \
@@ -119,83 +165,144 @@ curl -X POST http://localhost:8000/api/intent -H "Content-Type: application/json
 
 | Route | When | Path |
 |---|---|---|
-| `ARTICLE` | Asking about the article you're viewing | Reads that article — no search, no filters |
-| `NEWS` | News and current events (the default) | Guardian fetch → retrieve → rerank |
-| `WEB` | Not news (how-to, definitions, docs) or "search the web" | Web search only |
-| `BOTH` | Needs reporting plus outside context | Guardian retrieval, then web |
+| `ARTICLE` | About the article you're viewing | Reads that article — no search, no filters |
+| `NEWS` | News and current events (default) | Publisher fetch → retrieve → rerank |
+| `WEB` | Not news (how-to, definitions, docs), or "search the web" | Web search only |
+| `BOTH` | Needs reporting plus outside context | Newsroom retrieval, then web |
 
-Naming a site ("search youtube") always reaches the web and bypasses the low-signal domain filter — if you ask for a site, you get that site. Guardian evidence is topped up from the web when retrieval returns at or below `WEB_SEARCH_THRESHOLD` sources. The route, intent, and resolved question are shown as a badge above every answer.
+Resolution is the important half. `"search for related news on youtube"` becomes *"related news about UK manufacturers facing cyber-attacks"* — the subject comes from the conversation, and the instruction is handled separately. Naming a site always reaches the web and bypasses the low-signal domain filter: ask for YouTube, get YouTube.
 
-**Citation integrity is enforced end to end.** Web results exclude `theguardian.com`, carry `type: "web"` plus their real domain, continue the same citation numbering, and reach the model under an explicit non-Guardian header with instructions to name the site and never attribute it to The Guardian. Guardian and web evidence get separate context budgets, so long Guardian chunks can't starve web sources out of the prompt. Citation density scales with the answer: a single-article reply cites once, not on every bullet. The UI renders web citations in amber with a `Web · domain` label. With no `TAVILY_API_KEY`, no web request is ever made.
+The route, intent and resolved question appear as a badge above every answer.
 
-## How a question flows
+### 2. The RAG pipeline
 
-> "What are the biggest AI developments reported by The Guardian over the last seven days?"
-
-1. **Router** (LLM + deterministic date parser) → intent `LATEST_NEWS`, topic *AI*, `from_date`/`to_date` = last 7 days, freshness = high.
-2. **fetch_fresh** → Guardian `/search` (order-by newest, date-filtered) → unseen articles are normalized, HTML-cleaned, chunked (~800 tokens, 15% overlap), embedded, and upserted into pgvector. Already-indexed articles are skipped via ID + content hash.
-3. **retrieve** → hybrid search (cosine similarity + Postgres full-text, fused with Reciprocal Rank Fusion, recency-boosted, date/section-filtered) → top 20.
-4. **rerank** → LLM reranker keeps the best ~6 chunks.
-5. **synthesize** → grounded prompt with numbered evidence; the model must cite `[n]` and may not fabricate. Tokens stream over SSE.
-6. **Citations** → only real `webUrl`s from the Guardian API, rendered as clickable numbered sources.
-7. Conversation state (`topic`, `entities`, `date_range`, `active_article_id`, `previous_intent`, `last_sources`) is persisted — "Give me a timeline" or "Which article supports the second point?" reuse it.
-
-## Environment variables
-
-See [.env.example](.env.example). Highlights:
-
-| Variable | Purpose |
-|---|---|
-| `GUARDIAN_API_KEY` / `OPENAI_API_KEY` | server-side only, never exposed to React |
-| `TAVILY_API_KEY` | optional web search; empty = Guardian-only mode |
-| `PREFERRED_PRODUCTION_OFFICE` / `EDITION_BOOST` | Guardian desk to favour in ranking (default `US`) |
-| `WEB_SEARCH_THRESHOLD` / `WEB_SEARCH_MAX_RESULTS` | when to top up with web sources, and how many |
-| `CHAT_MODEL`, `EMBEDDING_MODEL`, `EMBEDDING_DIMENSIONS` | model selection (modular providers) |
-| `DATABASE_URL`, `REDIS_URL` | infrastructure |
-| `FRONTEND_URL`, `EXTRA_CORS_ORIGINS` | CORS allowlist (never `*` in production) |
-| `RAG_INITIAL_TOP_K` / `RAG_FINAL_TOP_K` | retrieval funnel (default 20 → 6) |
-| `RERANKER` | `llm` (default), `cohere`, or `none` |
-| `VITE_API_BASE_URL` | build-time API base for the React bundle |
-| `API_KEY` / `VITE_API_KEY` | optional shared-secret gate for private deployments (`X-API-Key` header) |
-| `RATE_LIMIT_PER_MINUTE` / `CHAT_RATE_LIMIT_PER_MINUTE` | per-IP budgets (30 general / 10 for chat) |
-| `ALLOWED_HOSTS`, `MAX_BODY_BYTES`, `REQUEST_TIMEOUT_SECONDS` | host allowlist, body cap (64 KB), time-to-first-byte cap (120 s) |
-
-## Git & GitHub setup
-
-This repository lives at `https://github.com/AJKumarReddy/Agentic-News-app`. To recreate the setup from scratch (e.g. for a fork):
-
-```bash
-git init
-git add .
-git commit -m "Initial Guardian AI application"
-git branch -M main
-git remote add origin <GITHUB_REPOSITORY_URL>
-git push -u origin main
+```
+publisher APIs → normalize → dedup (id + content hash) → chunk (~800 tok, 15% overlap)
+              → embed (batched) → pgvector
+              → hybrid retrieve (cosine + Postgres FTS, fused with RRF)
+              → recency + edition boost → rerank → source diversity → top ~6
 ```
 
-**Never commit:** `.env`, API keys, database passwords, AWS credentials, SSH keys — all covered by [.gitignore](.gitignore).
+- **Date handling** is deterministic ("this week", "last 3 months" → exact ranges), not left to the model.
+- **Narrow windows widen rather than fail.** A "today" query early in the publishing day matches nothing; retrieval relaxes to 14 days, then to everything, and the UI shows a *"Results from Last 14 days"* badge — the answer itself never editorialises about the search window.
+- **Incremental only.** The whole index is never rebuilt; an article is embedded once and re-embedded only if its content hash or the embedding model changes.
+
+### 3. Citation integrity
+
+This is the part most likely to mislead a reader, so it's enforced end to end:
+
+- Web results **exclude our publishers' own domains**, so they can never duplicate or impersonate indexed journalism.
+- Every source carries a `type` (`publisher` / `web`), its publisher name and machine id, sharing **one citation numbering scheme**.
+- Newsroom and web evidence get **separate context budgets** — long full-text chunks were otherwise starving web sources out of the prompt entirely, which caused the model to invent attributions.
+- **Attribution must match the citation.** If a Guardian article reports what Reuters found, the answer must say "The Guardian reports that Reuters found… [1]" — never "Reuters reported… [1]", which implies Reuters is the cited source.
+- **Citation density scales with the answer.** A single-article reply cites once; a multi-source synthesis cites per claim.
+- NYT entries are **abstracts, not full articles**, and the prompt says so, so the model never implies it read the whole piece.
+- The UI renders web citations in amber with a `Web · domain` label, distinct from newsroom citations.
+
+---
+
+## News sources
+
+| Source | Coverage | Notes |
+|---|---|---|
+| **The Guardian** | Full article bodies, all sections, deep archive | The richest evidence; `productionOffice` enables US-desk preference |
+| **The New York Times** | Headlines, abstracts and lead paragraphs | The API exposes **no article bodies** — evidence is short by design |
+| **Tavily (web)** | Everything else | Supplementary only, gated and cited separately |
+
+**NYT specifics worth knowing:**
+
+- NYT enables each API **per key**. A key valid for Top Stories may be rejected by Article Search. The adapter detects a 401 once, remembers it, and falls back to Top Stories rather than dropping NYT entirely — enable "Article Search API" for your app at [developer.nytimes.com](https://developer.nytimes.com/) to unlock keyword search of the archive.
+- A keyword-less section browse uses **Top Stories** directly, since Article Search would otherwise be asked for the literal word "news".
+- Rate limits are tight (~5 req/min, 500/day); requests are throttled and responses cached.
+- Its `multimedia` field has shipped as a list of objects, a list of strings and a dict — all three are handled.
+
+Because NYT chunks are an order of magnitude shorter than full-text ones, **retrieval runs per source and merges**, and a diversity pass guarantees each publisher a foothold. Without it, answers silently became single-source.
+
+## Scheduled ingestion
+
+The backend pulls fresh articles **every 30 minutes** while it runs — no cron required.
+
+```bash
+# manual run (also what an external scheduler would call)
+docker compose exec backend python -m app.tasks.ingest_recent
+```
+
+Tune with `INGEST_INTERVAL_MINUTES`, or set `INGEST_ENABLED=false` to drive it externally. Under multiple Gunicorn workers a short-lived **Redis lock** ensures exactly one worker performs each run, so publisher API usage isn't multiplied by the worker count. The lock fails open: a Redis outage still ingests rather than silently freezing the index. A failed run is logged and retried on the next tick.
+
+## Interface
+
+**Three pages**, all responsive, in **light or dark theme** (follows your OS until you choose, then persists per browser):
+
+- **Chat** — streaming answers with a route badge, inline citation chips and a grouped source list
+- **Search** — 18 sections across three groups, date range, sort, per-publisher filter chips, real pagination (`Page 1 of 50 · 131,819 results`)
+- **Article intelligence** — AI summary, key points, entities, topics, important dates, related coverage, and "Ask AI about this article"
+
+Chats are scoped to an anonymous per-browser id (`X-Client-Id`), so one visitor never sees another's history; individual chats and the whole history can be deleted from the sidebar.
+
+## Backend API
+
+| Endpoint | Description |
+|---|---|
+| `POST /api/chat` | agentic chat; `{"message", "conversation_id?", "article_id?", "stream": true}` → SSE (`state`, `route`, `status`, `token`, `sources`, `notice`, `done`, `error`) or JSON with `stream:false` |
+| `POST /api/intent` | routing decision only — no search, no answer, nothing written |
+| `GET /api/news/search` | multi-source search: `q, from_date, to_date, section, order_by, page, page_size, sources` |
+| `GET /api/news/sources` | active publishers, for the UI's filter |
+| `GET /api/news/article/{id}` | normalized article (index first, then publisher API) |
+| `GET /api/news/article/{id}/intelligence` | AI analysis + related coverage |
+| `POST /api/rag/retrieve` | hybrid retrieval with metadata filters |
+| `POST /api/rag/ingest` | index by article ids and/or a search query |
+| `GET /api/conversations` · `GET /api/conversations/{id}` | chat history, scoped to `X-Client-Id` |
+| `DELETE /api/conversations/{id}` · `DELETE /api/conversations` | delete one chat / clear history |
+| `GET /api/health` | database, vector extension, cache and each publisher |
+
+## Testing
+
+```bash
+cd backend && pytest -q     # 110 tests
+cd frontend && npm test     # 17 tests
+```
+
+Covers the Guardian and NYT adapters (mocked HTTP), chunking, dedup, RRF fusion, edition boost, source diversity, reranking, routing and resolution, the scheduler's lock, security middleware, API contracts, the SSE parser and citation components.
+
+**RAG evaluation** — 20 questions against a running stack with real keys:
+
+```bash
+cd backend && python evaluation/run_eval.py --base-url http://localhost:8000
+```
+
+Checks citation presence, real publisher URLs, honest refusals on unanswerable questions (anti-hallucination), routing accuracy and follow-up context retention.
+
+---
+
+## Deployment
+
+### Docker Compose
+
+```bash
+docker compose up -d --build              # local
+docker compose --profile prod up -d --build   # adds nginx + certbot
+```
+
+Services: `postgres` (pgvector), `redis`, `backend`, `frontend`, and in the `prod` profile `nginx` + `certbot`. Postgres and Redis bind to loopback only.
+
+**Where your data lives:** the Docker volume `project_postgres-data` (`/var/lib/docker/volumes/project_postgres-data/_data`, inside the Docker VM). It survives `docker compose down`; only `down -v` destroys it. Back up with:
+
+```bash
+docker exec project-postgres-1 pg_dump -U guardian guardian_news > backup.sql
+```
+
+Article text and embeddings are rebuildable from the APIs — conversations are the only irreplaceable data.
 
 ### CI/CD (GitHub Actions)
 
-- **`test.yml`** — on every push/PR: backend pytest + import validation, frontend vitest + production build, Docker image builds.
-- **`deploy.yml`** — on push to `main`: runs the full test workflow, then SSHes into EC2, `git reset --hard origin/main`, `docker compose --profile prod up -d --build`, prunes images, and runs the health check. A failed health check fails the deploy.
+- **`test.yml`** — every push/PR: backend pytest + import validation, frontend vitest + production build, Docker image builds.
+- **`deploy.yml`** — push to `main`: runs the test workflow, SSHes into EC2, `git reset --hard origin/main`, rebuilds containers, prunes images, runs the health check. A failed health check fails the deploy.
 
-Create these **GitHub Secrets** (Settings → Secrets and variables → Actions):
+Required **GitHub Secrets**: `EC2_HOST`, `EC2_USER` (`ubuntu`), `EC2_SSH_KEY` (PEM contents), optional `EC2_APP_DIR`. Optional repo variable `PUBLIC_API_URL` enables a public post-deploy check.
 
-| Secret | Value |
-|---|---|
-| `EC2_HOST` | EC2 public IP or DNS |
-| `EC2_USER` | `ubuntu` |
-| `EC2_SSH_KEY` | contents of the private key (PEM) for the instance |
-| `EC2_APP_DIR` | optional, defaults to `~/guardian-ai-news-assistant` |
-
-Optional repo **variable** `PUBLIC_API_URL` (e.g. `https://api.mydomain.com`) enables a public post-deploy check.
-
-## AWS EC2 deployment (step by step)
+### AWS EC2 (step by step)
 
 **Instance:** Ubuntu 22.04/24.04, `t3.small` minimum (`t3.medium` recommended — embeddings + Postgres + Redis), 30 GB gp3.
-
-**Security group:**
 
 | Port | Purpose | Source |
 |---|---|---|
@@ -203,18 +310,19 @@ Optional repo **variable** `PUBLIC_API_URL` (e.g. `https://api.mydomain.com`) en
 | 80 | HTTP (ACME + redirect) | 0.0.0.0/0 |
 | 443 | HTTPS | 0.0.0.0/0 |
 
-Do **not** open 5432 (Postgres), 6379 (Redis), or 8000 — they are bound to the Docker network / loopback only.
+Do **not** open 5432, 6379 or 8000 — they stay on the Docker network / loopback.
 
 ```bash
 # 1. SSH in
 ssh -i mykey.pem ubuntu@<EC2_PUBLIC_IP>
 
-# 2. Provision (installs git, docker, compose, certbot)
-curl -fsSL https://raw.githubusercontent.com/<you>/guardian-ai-news-assistant/main/scripts/setup-ec2.sh | REPO_URL=https://github.com/<you>/guardian-ai-news-assistant.git bash
-# log out & back in for docker group membership
+# 2. Provision (git, docker, compose, certbot)
+curl -fsSL https://raw.githubusercontent.com/AJKumarReddy/Agentic-News-app/main/scripts/setup-ec2.sh \
+  | REPO_URL=https://github.com/AJKumarReddy/Agentic-News-app.git bash
+# log out and back in for docker group membership
 
 # 3. Configure
-cd ~/guardian-ai-news-assistant
+cd ~/Agentic-News-app
 cp .env.example .env && nano .env
 #   ENVIRONMENT=production
 #   strong POSTGRES_PASSWORD (mirror it inside DATABASE_URL)
@@ -222,48 +330,38 @@ cp .env.example .env && nano .env
 #   VITE_API_BASE_URL=https://api.mydomain.com/api
 sed -i 's/mydomain.com/YOURDOMAIN.com/g' nginx/nginx.conf
 
-# 4. TLS certificate (before nginx runs; port 80 must be free)
+# 4. TLS certificate (port 80 must be free)
 sudo certbot certonly --standalone -d api.mydomain.com
-#   (add -d mydomain.com -d www.mydomain.com if hosting the frontend on AWS too)
 
 # 5. Launch
 docker compose --profile prod up -d --build
-docker ps
 bash scripts/health-check.sh http://localhost:8000
 
 # 6. Verify from outside
 curl https://api.mydomain.com/api/health
 ```
 
-**Certificate renewal** is automatic: the `certbot` compose service renews via webroot every 12 h; after renewal nginx picks up certs on its periodic reload (or `docker compose exec nginx nginx -s reload`).
+**Certificate renewal** is automatic — the `certbot` service renews via webroot every 12 h; nginx picks up new certs on reload (`docker compose exec nginx nginx -s reload`).
 
-**Scheduled ingestion** runs inside the backend every 30 minutes by default — no cron needed. Tune it with `INGEST_INTERVAL_MINUTES`, or set `INGEST_ENABLED=false` to disable and drive it externally:
+### Hostinger domain + frontend hosting
 
-```bash
-docker compose exec backend python -m app.tasks.ingest_recent
-```
+Recommended: **subdomain split** — `mydomain.com` (frontend on Hostinger) + `api.mydomain.com` (EC2). The root domain keeps pointing at Hostinger while one A record delegates the API.
 
-Under multiple Gunicorn workers a short-lived Redis lock ensures exactly one worker performs each run, so publisher API usage isn't multiplied by the worker count.
-
-## Hostinger domain + frontend hosting
-
-You own the domain at Hostinger; the API lives on EC2. Recommended: **subdomain split** — `mydomain.com` (frontend) + `api.mydomain.com` (EC2). This is the easiest layout with Hostinger DNS because the root domain keeps pointing at Hostinger's web hosting while one A record delegates the API.
-
-### 1. DNS (Hostinger hPanel → Domains → DNS / Name Servers)
+**1. DNS** (hPanel → Domains → DNS):
 
 | Type | Name | Value | TTL |
 |---|---|---|---|
-| A | `api` | `<EC2 public IP>` (allocate an **Elastic IP** first so it never changes) | 300 |
-| A / ALIAS | `@` | Hostinger web hosting (leave as-is if using Hostinger hosting) | — |
+| A | `api` | `<EC2 Elastic IP>` (allocate one first so it never changes) | 300 |
+| A / ALIAS | `@` | Hostinger web hosting (leave as-is) | — |
 
-### 2. Frontend on Hostinger
+**2. Frontend build:**
 
 ```bash
 cd frontend
-VITE_API_BASE_URL=https://api.mydomain.com/api npm run build   # produces dist/
+VITE_API_BASE_URL=https://api.mydomain.com/api npm run build   # → dist/
 ```
 
-Upload `dist/` via hPanel **File Manager** (or FTP) into `public_html/` so `index.html` sits at `public_html/index.html`. Because this is a SPA with client-side routing, add `public_html/.htaccess`:
+Upload `dist/` into `public_html/` via hPanel File Manager or FTP. Because this is a SPA with client-side routing, add `public_html/.htaccess`:
 
 ```apache
 RewriteEngine On
@@ -273,70 +371,57 @@ RewriteCond %{REQUEST_FILENAME} !-d
 RewriteRule . /index.html [L]
 ```
 
-Enable **SSL** for the domain in hPanel (free Let's Encrypt, one click) and force HTTPS.
+Enable free SSL in hPanel and force HTTPS. For automatic deploys, add a GitHub Actions step that pushes `dist/` over FTP (e.g. `SamKirkland/FTP-Deploy-Action`) with credentials in GitHub Secrets.
 
-Automatic deploys (optional): add a GitHub Actions step that builds the frontend and pushes `dist/` to Hostinger over FTP (e.g. `SamKirkland/FTP-Deploy-Action`) using FTP credentials stored as GitHub Secrets.
+**Alternative — everything on AWS:** point `@` and `www` at the Elastic IP, issue certs for those names, and enable the "Option B" block in `nginx/nginx.conf`. Then set `VITE_API_BASE_URL=/api` — same origin, no CORS at all.
 
-### 3. Alternative — everything on AWS
+### Alternative: CodePipeline → ECR → ECS Fargate
 
-Point `@` and `www` A records at the EC2 Elastic IP, issue certs for those names, and enable the "Option B" server block in `nginx/nginx.conf`; nginx then serves the React container at `/` and proxies `/api`. With this layout set `VITE_API_BASE_URL=/api` (same-origin, no CORS at all).
+An AWS-native pipeline (GitHub → CodePipeline → CodeBuild → ECR → ECS Fargate, with RDS PostgreSQL + ElastiCache Redis behind an ALB) is documented in **[aws/ECS_PIPELINE.md](aws/ECS_PIPELINE.md)**, with [`buildspec.yml`](buildspec.yml) and Fargate [task definitions](aws/) ready to use. Choose it for managed rolling deploys and autoscaling; the EC2 path is far cheaper (~$15–30/mo vs ~$80–120).
 
-## Backend API
-
-| Endpoint | Description |
-|---|---|
-| `POST /api/chat` | agentic chat; `{"message", "conversation_id?", "article_id?", "stream": true}` → SSE (`status`, `token`, `sources`, `state`, `done`, `error`) or JSON with `stream:false` |
-| `GET /api/news/search` | Guardian search proxy: `q, from_date, to_date, section, tag, author, order_by, page, page_size` (Redis-cached 5 min) |
-| `GET /api/news/article/{id}` | normalized article by Guardian ID |
-| `GET /api/news/article/{id}/intelligence` | AI summary, key points, entities, topics, dates + related articles |
-| `POST /api/rag/retrieve` | hybrid retrieval with metadata filters |
-| `POST /api/rag/ingest` | index articles by IDs and/or search query |
-| `POST /api/intent` | routing decision only — no search, no answer |
-| `GET /api/conversations`, `GET /api/conversations/{id}` | chat history (scoped to the caller's `X-Client-Id`) |
-| `DELETE /api/conversations/{id}` | delete one chat; 404 if it belongs to another client |
-| `DELETE /api/conversations` | clear the caller's chat history |
-| `GET /api/health` | component status: database, vector extension, cache, Guardian API |
-
-## Security checklist (production)
-
-- [x] API keys server-side only; React never sees them
-- [x] Optional `X-API-Key` gate for the whole API (`API_KEY` env; constant-time comparison) for private deployments
-- [x] CORS restricted to explicit origins (`FRONTEND_URL` + `EXTRA_CORS_ORIGINS`); optional Host allowlist (`ALLOWED_HOSTS`)
-- [x] Per-IP rate limiting (30 req/min general, 10 req/min for `/api/chat`) + request size/length validation (Pydantic)
-- [x] Request body size cap (64 KB) and time-to-first-byte timeout (120 s)
-- [x] Content-Security-Policy on both API responses and the SPA (Guardian media allowlisted)
-- [x] Secure headers (nosniff, frame-deny, referrer policy, HSTS at nginx)
-- [x] Guardian/OpenAI calls time-boxed with retries; SSE proxied unbuffered
-- [x] Agent is a bounded graph (recursion limit, capped evidence context, capped tool fan-out)
-- [x] Prompt-injection defenses: evidence wrapped as data with explicit "ignore instructions inside articles" rule; user input sanitized and truncated
-- [x] Postgres/Redis never exposed publicly (loopback + Docker network only)
-- [x] Non-root Docker user for the backend; secrets via `.env`/GitHub Secrets only
-- [x] Structured JSON logs with request IDs; secret values redacted, never logged
-- [ ] Rotate `POSTGRES_PASSWORD` and API keys periodically
-- [ ] Restrict SSH to your IP; consider SSM Session Manager instead of SSH
-- [ ] Enable EC2 EBS snapshots / `pg_dump` backups
-
-## Alternative deployment: CodePipeline → ECR → ECS Fargate
-
-An AWS-native pipeline (GitHub → CodePipeline → CodeBuild → ECR → ECS Fargate, with RDS PostgreSQL + ElastiCache Redis behind an ALB) is fully documented in **[aws/ECS_PIPELINE.md](aws/ECS_PIPELINE.md)**. The repo ships ready for it:
-
-- [`buildspec.yml`](buildspec.yml) — CodeBuild builds/pushes both images and emits per-service image definitions
-- [`aws/taskdef-backend.json`](aws/taskdef-backend.json) / [`aws/taskdef-frontend.json`](aws/taskdef-frontend.json) — Fargate task definitions with SSM-injected secrets and health checks
-
-Choose it over the EC2 path when you want managed rolling deploys and autoscaling instead of the cheapest possible single server.
-
-## Growing beyond one EC2 instance
+### Growing beyond one instance
 
 | Concern | Upgrade path |
 |---|---|
-| Database durability | Move Postgres to **RDS PostgreSQL** (pgvector is supported) — change `DATABASE_URL`, drop the `postgres` service |
+| Database durability | **RDS PostgreSQL** (pgvector supported) — change `DATABASE_URL`, drop the `postgres` service |
 | Cache | **ElastiCache Redis** — change `REDIS_URL` |
-| Logs/metrics | Ship JSON logs to **CloudWatch** (awslogs Docker log driver) |
+| Logs/metrics | Ship JSON logs to **CloudWatch** via the awslogs driver |
 | Images | Push to **ECR**; deploy tags instead of building on the host |
-| Scale-out | **ALB + ECS Fargate** for the backend; move rate limiting to Redis storage |
-| Assets | Frontend to **S3 + CloudFront** if leaving Hostinger |
-| Background jobs | Promote `app/tasks` to Celery + Redis when ingestion volume grows |
+| Scale-out | **ALB + ECS Fargate**; move rate limiting to Redis storage |
+| Assets | Frontend to **S3 + CloudFront** |
+| Background jobs | Promote `app/tasks` to Celery when ingestion volume grows |
 
-## License
+## Security checklist (production)
 
-For educational/portfolio use. Guardian content is subject to the [Guardian Open Platform terms](https://open-platform.theguardian.com/documentation/) — non-commercial tiers must retain attribution and link back to source articles (which the citation system does by design).
+- [x] API keys server-side only; the React bundle never sees them
+- [x] Optional `X-API-Key` gate for the whole API (constant-time comparison)
+- [x] CORS restricted to explicit origins; optional Host allowlist
+- [x] Per-IP rate limiting (30/min general, 10/min for `/api/chat`) with idle-key eviction
+- [x] Request body cap (64 KB) and time-to-first-byte timeout (120 s)
+- [x] Content-Security-Policy on API responses and the SPA
+- [x] Secure headers (nosniff, frame-deny, referrer policy, HSTS at nginx)
+- [x] Publisher/OpenAI calls time-boxed with retries; SSE proxied unbuffered
+- [x] Bounded agent (recursion limit, capped evidence context, capped tool fan-out)
+- [x] Prompt-injection defenses: evidence wrapped as data with an explicit "ignore instructions inside articles" rule; user input sanitized and truncated
+- [x] Conversations scoped per client; cross-client access returns 404, not 403, so ids aren't enumerable
+- [x] Postgres/Redis never exposed publicly
+- [x] Non-root Docker user for the backend; secrets via `.env` / GitHub Secrets only
+- [x] Structured JSON logs with request ids; secrets redacted, never logged
+- [ ] Rotate `POSTGRES_PASSWORD` and API keys periodically
+- [ ] Restrict SSH to your IP; consider SSM Session Manager
+- [ ] Enable EBS snapshots / scheduled `pg_dump`
+
+## Troubleshooting
+
+| Symptom | Cause and fix |
+|---|---|
+| Blank page, or "class does not exist" in dev | `tailwind.config.js` changed while the dev server was running — **restart Vite**. If it starts on `:5174`, an orphaned process still holds `:5173`; kill it. |
+| NYT missing from results | Key not licensed for Article Search (401). It falls back to Top Stories; enable "Article Search API" at developer.nytimes.com for archive search. |
+| `"nyt": "unavailable"` in `/api/health` | No `NYT_API_KEY`, or the key is rejected by every endpoint. |
+| Answer says evidence is insufficient | Index may be cold — run `python -m app.tasks.ingest_recent`, or wait for the 30-minute tick. |
+| Chat returns 500 | Missing `OPENAI_API_KEY`, or Postgres/pgvector not reachable — check `/api/health`. |
+| Frontend can't reach the API | `VITE_API_BASE_URL` mismatch, or the origin isn't in `FRONTEND_URL`/`EXTRA_CORS_ORIGINS`. |
+
+## License and attribution
+
+For educational and portfolio use. Content is subject to each publisher's terms — the [Guardian Open Platform](https://open-platform.theguardian.com/documentation/) and the [NYT Developer terms](https://developer.nytimes.com/terms). Non-commercial tiers require retaining attribution and linking back to source articles, which the citation system does by design.
