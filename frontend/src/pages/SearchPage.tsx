@@ -76,12 +76,12 @@ export default function SearchPage() {
   };
 
   const inputClass =
-    'rounded-lg border border-ink-200 bg-white px-3 py-2 text-sm text-ink-800 transition-colors focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-100';
+    'rounded-lg border border-ink-200 bg-white px-3 py-2 text-sm text-ink-800 transition-colors focus:border-accent-400 focus:outline-none focus:ring-2 focus:ring-accent-100';
 
   return (
-    <div className="h-full overflow-y-auto bg-ink-50">
+    <div className="h-full overflow-y-auto bg-brand-soft">
       <div className="mx-auto max-w-6xl px-4 py-7">
-        <h1 className="font-serif text-2xl font-bold text-ink-900">Search the news</h1>
+        <h1 className="gradient-text font-serif text-2xl font-bold">Search the news</h1>
         <p className="mt-1 text-sm text-ink-500">
           Across {sources.length > 0 ? sources.map((s) => s.name).join(' and ') : 'all newsrooms'}
         </p>
@@ -132,7 +132,7 @@ export default function SearchPage() {
             <button
               type="submit"
               disabled={loading}
-              className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-brand-700 disabled:opacity-50"
+              className="rounded-lg bg-brand-gradient px-4 py-2 text-sm font-semibold text-white shadow-glow transition-opacity hover:opacity-90 disabled:opacity-50"
             >
               Search
             </button>
@@ -150,7 +150,7 @@ export default function SearchPage() {
                   onClick={() => toggleSource(source.id)}
                   className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
                     selected
-                      ? 'border-brand-300 bg-brand-50 text-brand-700'
+                      ? 'border-accent-300 bg-accent-50 text-accent-700'
                       : 'border-ink-200 bg-white text-ink-400 hover:border-ink-300'
                   }`}
                 >

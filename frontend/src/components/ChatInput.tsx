@@ -32,7 +32,7 @@ export default function ChatInput({
   return (
     <form
       onSubmit={submit}
-      className="flex items-end gap-2 rounded-2xl border border-ink-200 bg-white p-2 shadow-card transition-colors focus-within:border-brand-400 focus-within:ring-4 focus-within:ring-brand-100"
+      className="flex items-end gap-2 rounded-2xl border border-ink-200 bg-white p-2 shadow-card transition-colors focus-within:border-accent-400 focus-within:ring-4 focus-within:ring-accent-100"
     >
       <textarea
         ref={textareaRef}
@@ -62,7 +62,7 @@ export default function ChatInput({
           type="submit"
           disabled={busy || !text.trim()}
           aria-label="Send message"
-          className="shrink-0 rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-brand-700 disabled:cursor-not-allowed disabled:bg-ink-300"
+          className="shrink-0 rounded-xl bg-brand-gradient px-4 py-2.5 text-sm font-semibold text-white shadow-glow transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:bg-ink-300 disabled:bg-none disabled:shadow-none"
         >
           Send
         </button>

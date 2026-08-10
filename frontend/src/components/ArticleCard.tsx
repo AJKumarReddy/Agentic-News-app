@@ -7,9 +7,12 @@ export default function ArticleCard({ article }: { article: Article }) {
   const navigate = useNavigate();
   const published = formatArticleDate(article.published_at, 'short');
   const href = `/article/${encodeURIComponent(article.article_id)}`;
+  // tint the accent by publisher so a scan of the grid shows the source mix
+  const accentBar =
+    article.source_id === 'nyt' ? 'from-accent-400 to-accent-600' : 'from-brand-400 to-brand-600';
 
   return (
-    <article className="group flex flex-col overflow-hidden rounded-xl border border-ink-200 bg-white shadow-card transition-all duration-200 hover:-translate-y-0.5 hover:border-ink-300 hover:shadow-lift">
+    <article className="group flex flex-col overflow-hidden rounded-xl border border-ink-200 bg-white shadow-card transition-all duration-200 hover:-translate-y-0.5 hover:border-brand-200 hover:shadow-lift">
       {article.thumbnail ? (
         <Link to={href} className="block overflow-hidden bg-ink-100">
           <img
@@ -20,7 +23,7 @@ export default function ArticleCard({ article }: { article: Article }) {
           />
         </Link>
       ) : (
-        <Link to={href} className="block h-2 bg-gradient-to-r from-brand-400 to-brand-600" />
+        <Link to={href} className={`block h-1.5 bg-gradient-to-r ${accentBar}`} />
       )}
 
       <div className="flex flex-1 flex-col p-4">
@@ -62,7 +65,7 @@ export default function ArticleCard({ article }: { article: Article }) {
                 },
               })
             }
-            className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-brand-700"
+            className="rounded-lg bg-brand-gradient px-3 py-1.5 text-xs font-semibold text-white transition-opacity hover:opacity-90"
           >
             Ask AI
           </button>
