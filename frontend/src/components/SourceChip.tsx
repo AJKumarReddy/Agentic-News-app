@@ -4,7 +4,7 @@
 const STYLES: Record<string, { label: string; className: string }> = {
   guardian: { label: 'Guardian', className: 'bg-[#0b5394]/10 text-[#0b5394]' },
   nyt: { label: 'NY Times', className: 'bg-ink-900/8 text-ink-900' },
-  web: { label: 'Web', className: 'bg-amber-100 text-amber-700' },
+  web: { label: 'Web', className: 'bg-warm-100 text-warm-700' },
 };
 
 export default function SourceChip({

@@ -10,7 +10,7 @@ function MessageBubble({ message }: { message: ChatMessage }) {
   if (message.role === 'user') {
     return (
       <div className="flex animate-fade-up justify-end">
-        <div className="max-w-[80%] rounded-2xl rounded-br-md bg-brand-600 px-4 py-2.5 text-[15px] leading-relaxed text-white shadow-sm">
+        <div className="max-w-[80%] rounded-2xl rounded-br-md bg-brand-gradient px-4 py-2.5 shadow-glow text-[15px] leading-relaxed text-white shadow-sm">
           {message.content}
         </div>
       </div>
@@ -23,8 +23,8 @@ function MessageBubble({ message }: { message: ChatMessage }) {
         {message.status && (
           <div className="flex items-center gap-2 py-1 text-sm text-ink-500">
             <span className="relative flex h-2 w-2">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-brand-400 opacity-75" />
-              <span className="relative inline-flex h-2 w-2 rounded-full bg-brand-500" />
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent-400 opacity-75" />
+              <span className="relative inline-flex h-2 w-2 rounded-full bg-accent-500" />
             </span>
             {message.status}
           </div>
@@ -33,7 +33,7 @@ function MessageBubble({ message }: { message: ChatMessage }) {
         {message.routing && !message.streaming && <RouteBadge routing={message.routing} />}
 
         {message.notice && !message.streaming && (
-          <div className="mb-3 inline-flex items-center gap-1.5 rounded-md bg-amber-50 px-2.5 py-1 text-[11px] font-medium text-amber-800">
+          <div className="mb-3 inline-flex items-center gap-1.5 rounded-md bg-warm-50 px-2.5 py-1 text-[11px] font-medium text-warm-800">
             <span aria-hidden="true">◷</span>
             {message.notice}
           </div>

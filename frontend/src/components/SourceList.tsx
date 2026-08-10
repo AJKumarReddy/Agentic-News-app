@@ -25,7 +25,7 @@ export default function SourceList({ sources }: { sources: Source[] }) {
             <li key={source.n} className="flex gap-2.5 text-sm">
               <span
                 className={`mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded text-[11px] font-bold ${
-                  isWeb ? 'bg-amber-100 text-amber-700' : 'bg-brand-100 text-brand-700'
+                  isWeb ? 'bg-warm-100 text-warm-700' : 'bg-brand-100 text-brand-700'
                 }`}
               >
                 {source.n}

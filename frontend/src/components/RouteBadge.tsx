@@ -13,12 +13,12 @@ const ROUTE_LABELS: Record<string, { label: string; className: string; title: st
   },
   WEB: {
     label: 'Web',
-    className: 'bg-amber-50 text-amber-700',
+    className: 'bg-warm-50 text-warm-700',
     title: 'Answered from web sources',
   },
   BOTH: {
     label: 'News + Web',
-    className: 'bg-emerald-50 text-emerald-700',
+    className: 'bg-accent-50 text-accent-700',
     title: 'Answered from newsroom reporting plus web sources',
   },
 };

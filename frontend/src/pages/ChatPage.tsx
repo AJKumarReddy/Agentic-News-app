@@ -5,11 +5,16 @@ import MessageBubble from '../components/MessageBubble';
 import { getConversation } from '../services/api';
 import { useChat } from '../hooks/useChat';
 
+// each prompt gets its own accent so the grid reads as a palette, not a block
 const SUGGESTIONS = [
-  { label: 'Top US news today', hint: 'Latest across newsrooms' },
-  { label: 'US politics this week', hint: 'What changed and when' },
-  { label: 'Latest AI developments', hint: 'Technology coverage' },
-  { label: 'Compare coverage of OpenAI and Anthropic', hint: 'Side-by-side reporting' },
+  { label: 'Top US news today', hint: 'Latest across newsrooms', accent: 'from-brand-500 to-brand-700' },
+  { label: 'US politics this week', hint: 'What changed and when', accent: 'from-accent-400 to-accent-600' },
+  { label: 'Latest AI developments', hint: 'Technology coverage', accent: 'from-warm-400 to-warm-600' },
+  {
+    label: 'Compare coverage of OpenAI and Anthropic',
+    hint: 'Side-by-side reporting',
+    accent: 'from-brand-400 to-accent-500',
+  },
 ];
 
 export default function ChatPage({ onConversationChange }: { onConversationChange?: () => void }) {
@@ -74,15 +79,15 @@ export default function ChatPage({ onConversationChange }: { onConversationChang
   const empty = messages.length === 0;
 
   return (
-    <div className="flex h-full flex-col bg-ink-50">
+    <div className="flex h-full flex-col bg-brand-soft">
       <div className="flex-1 overflow-y-auto">
         <div className="mx-auto max-w-3xl px-4 py-8">
           {empty ? (
             <div className="mt-12 animate-fade-up text-center">
-              <div className="mx-auto mb-5 flex h-12 w-12 items-center justify-center rounded-xl bg-brand-600 text-xl font-bold text-white shadow-lift">
+              <div className="mx-auto mb-5 flex h-12 w-12 items-center justify-center rounded-xl bg-brand-gradient text-xl font-bold text-white shadow-glow">
                 N
               </div>
-              <h1 className="font-serif text-[34px] font-bold leading-tight text-ink-900">News AI</h1>
+              <h1 className="gradient-text font-serif text-[34px] font-bold leading-tight">News AI</h1>
               <p className="mx-auto mt-2.5 max-w-md text-[15px] leading-relaxed text-ink-600">
                 Ask anything about the news. Answers are grounded in reporting from The Guardian and
                 The New York Times, with every claim cited.
@@ -93,8 +98,12 @@ export default function ChatPage({ onConversationChange }: { onConversationChang
                   <button
                     key={item.label}
                     onClick={() => send(item.label)}
-                    className="group rounded-xl border border-ink-200 bg-white p-3.5 text-left shadow-card transition-all hover:-translate-y-0.5 hover:border-brand-300 hover:shadow-lift"
+                    className="group relative overflow-hidden rounded-xl border border-ink-200 bg-white p-3.5 pl-5 text-left shadow-card transition-all hover:-translate-y-0.5 hover:border-brand-300 hover:shadow-lift"
                   >
+                    <span
+                      className={`absolute inset-y-0 left-0 w-1.5 bg-gradient-to-b ${item.accent}`}
+                      aria-hidden="true"
+                    />
                     <span className="block text-sm font-semibold text-ink-800 group-hover:text-brand-700">
                       {item.label}
                     </span>
@@ -114,7 +123,7 @@ export default function ChatPage({ onConversationChange }: { onConversationChang
         </div>
       </div>
 
-      <div className="border-t border-ink-200 bg-white/70 backdrop-blur">
+      <div className="border-t border-ink-200 bg-white/80 backdrop-blur">
         <div className="mx-auto max-w-3xl px-4 py-4">
           <ChatInput onSend={send} busy={busy} onStop={stop} />
           <p className="mt-2.5 text-center text-[11px] text-ink-400">

@@ -53,11 +53,11 @@ export default function Sidebar({ refreshKey }: { refreshKey?: number }) {
 
   const navClass = ({ isActive }: { isActive: boolean }) =>
     `flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
-      isActive ? 'bg-white/10 text-white' : 'text-brand-100/80 hover:bg-white/5 hover:text-white'
+      isActive ? 'bg-white/10 text-white' : 'text-accent-200/80 hover:bg-white/5 hover:text-white'
     }`;
 
   return (
-    <aside className="hidden w-[264px] shrink-0 flex-col bg-brand-950 text-white md:flex">
+    <aside className="hidden w-[264px] shrink-0 flex-col bg-sidebar-gradient text-white md:flex">
       {/* the logo returns to the landing screen; without fresh state the
           route is already "/" and the open conversation would stay mounted */}
       <Link
@@ -65,19 +65,19 @@ export default function Sidebar({ refreshKey }: { refreshKey?: number }) {
         state={{ newChat: Date.now() }}
         className="flex items-center gap-2.5 border-b border-white/10 px-5 py-4 transition-colors hover:bg-white/5"
       >
-        <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-500 text-[15px] font-bold">
+        <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-gradient text-[15px] font-bold shadow-glow">
           N
         </span>
         <span>
           <span className="block text-[15px] font-semibold leading-tight">News AI</span>
-          <span className="block text-[11px] text-brand-100/60">Research assistant</span>
+          <span className="block text-[11px] text-accent-200/50">Research assistant</span>
         </span>
       </Link>
 
       <div className="space-y-1 p-3">
         <button
           onClick={() => navigate('/', { state: { newChat: Date.now() } })}
-          className="flex w-full items-center gap-2 rounded-lg bg-brand-500 px-3 py-2 text-sm font-semibold transition-colors hover:bg-brand-400"
+          className="flex w-full items-center gap-2 rounded-lg bg-brand-gradient px-3 py-2 text-sm font-semibold shadow-glow transition-opacity hover:opacity-90"
         >
           <span className="text-base leading-none">+</span> New chat
         </button>
@@ -87,7 +87,7 @@ export default function Sidebar({ refreshKey }: { refreshKey?: number }) {
       </div>
 
       <div className="px-3 pt-2">
-        <div className="px-3 pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-brand-100/40">
+        <div className="px-3 pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-white/35">
           Sections
         </div>
         <div className="space-y-0.5">
@@ -95,7 +95,7 @@ export default function Sidebar({ refreshKey }: { refreshKey?: number }) {
             <Link
               key={section.id}
               to={`/search?section=${section.id}`}
-              className="block rounded-lg px-3 py-1.5 text-[13px] text-brand-100/75 transition-colors hover:bg-white/5 hover:text-white"
+              className="block rounded-lg px-3 py-1.5 text-[13px] text-white/70 transition-colors hover:bg-white/5 hover:text-white"
             >
               {section.label}
             </Link>
@@ -105,13 +105,13 @@ export default function Sidebar({ refreshKey }: { refreshKey?: number }) {
 
       <div className="mt-4 flex-1 overflow-y-auto px-3">
         <div className="flex items-center justify-between px-3 pb-1.5">
-          <span className="text-[10px] font-semibold uppercase tracking-wider text-brand-100/40">
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-white/35">
             Recent chats
           </span>
           {conversations.length > 0 && (
             <button
               onClick={removeAll}
-              className="text-[10px] font-medium text-brand-100/40 transition-colors hover:text-red-300"
+              className="text-[10px] font-medium text-white/35 transition-colors hover:text-red-300"
               title="Delete all chats"
             >
               Clear all
@@ -120,7 +120,7 @@ export default function Sidebar({ refreshKey }: { refreshKey?: number }) {
         </div>
         <div className="space-y-0.5 pb-4">
           {conversations.length === 0 && (
-            <div className="px-3 py-2 text-xs text-brand-100/35">No conversations yet</div>
+            <div className="px-3 py-2 text-xs text-white/30">No conversations yet</div>
           )}
           {conversations.map((conversation) => (
             <div
@@ -131,7 +131,7 @@ export default function Sidebar({ refreshKey }: { refreshKey?: number }) {
             >
               <Link
                 to={`/?conversation=${conversation.id}`}
-                className="min-w-0 flex-1 truncate px-3 py-2 text-[13px] text-brand-100/85"
+                className="min-w-0 flex-1 truncate px-3 py-2 text-[13px] text-white/80"
                 title={conversation.title}
               >
                 {conversation.title}
@@ -141,7 +141,7 @@ export default function Sidebar({ refreshKey }: { refreshKey?: number }) {
                 disabled={pendingDelete === conversation.id}
                 aria-label={`Delete chat: ${conversation.title}`}
                 title="Delete chat"
-                className="mr-1.5 rounded p-1 text-brand-100/30 opacity-0 transition-all hover:bg-red-500/20 hover:text-red-300 focus:opacity-100 group-hover:opacity-100 disabled:opacity-20"
+                className="mr-1.5 rounded p-1 text-white/25 opacity-0 transition-all hover:bg-red-500/20 hover:text-red-300 focus:opacity-100 group-hover:opacity-100 disabled:opacity-20"
               >
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M3 6h18M8 6V4a1 1 0 011-1h6a1 1 0 011 1v2M19 6l-1 14a1 1 0 01-1 1H7a1 1 0 01-1-1L5 6M10 11v6M14 11v6" />
@@ -152,7 +152,7 @@ export default function Sidebar({ refreshKey }: { refreshKey?: number }) {
         </div>
       </div>
 
-      <div className="border-t border-white/10 px-5 py-3.5 text-[10px] leading-relaxed text-brand-100/40">
+      <div className="border-t border-white/10 px-5 py-3.5 text-[10px] leading-relaxed text-white/35">
         {sources.length > 0 ? (
           <>Sourced from {sources.map((s) => s.name).join(' · ')}</>
         ) : (

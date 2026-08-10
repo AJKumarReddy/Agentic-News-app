@@ -66,7 +66,7 @@ body {
   @apply border-t border-ink-200 px-3 py-2 align-top;
 }
 .prose-chat a {
-  @apply text-brand-600 underline decoration-brand-300 underline-offset-2 hover:decoration-brand-600;
+  @apply text-accent-700 underline decoration-accent-300 underline-offset-2 hover:decoration-accent-600;
 }
 .prose-chat strong {
   @apply font-semibold text-ink-900;
@@ -87,8 +87,13 @@ body {
 }
 .citation-badge-web {
   @apply mx-0.5 inline-flex h-[17px] min-w-[17px] cursor-pointer items-center justify-center rounded
-         bg-amber-100 px-1 align-super text-[10px] font-bold text-amber-700 no-underline
-         transition-colors hover:bg-amber-500 hover:text-white;
+         bg-warm-100 px-1 align-super text-[10px] font-bold text-warm-700 no-underline
+         transition-colors hover:bg-warm-500 hover:text-white;
+}
+
+/* headline treatment: primary into secondary */
+.gradient-text {
+  @apply bg-brand-gradient bg-clip-text text-transparent;
 }
 
 /* skeleton loading */
