@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from app.agents.decision import decide_source, heuristic_plan
+from app.agents.decision import clean_web_query, decide_source, heuristic_plan
 
 
 class FakeLLM:
@@ -58,3 +58,19 @@ async def test_web_query_defaults_to_question():
     decision = await decide_source("How do I reset a Postgres password?", llm=None)
     assert decision["plan"] == "WEB"
     assert decision["web_query"]
+
+
+def test_clean_web_query_strips_invented_dates():
+    # models hallucinate stale qualifiers; recency is the engine's job
+    assert clean_web_query("OpenAI news October 2023") == "OpenAI news"
+    assert clean_web_query("latest Tesla earnings 2024") == "Tesla earnings"
+    assert clean_web_query("AI regulation") == "AI regulation"
+
+
+async def test_stale_date_stripped_from_llm_web_query():
+    decision = await decide_source(
+        "What do other outlets say about OpenAI?",
+        llm=FakeLLM('{"plan": "BOTH", "web_query": "OpenAI news October 2023"}'),
+    )
+    assert "2023" not in decision["web_query"]
+    assert "OpenAI" in decision["web_query"]

@@ -44,6 +44,7 @@ FRESH_INTENTS = {
 }
 
 MAX_EVIDENCE_CHARS = 14000  # hard cap on retrieval context sent to the LLM
+WEB_EVIDENCE_SHARE = 0.35  # portion of the cap reserved for web sources when present
 SEARCH_LOOKBACK_DAYS = 3  # fetch wider than we filter, so narrow windows aren't empty
 RELAX_WINDOW_DAYS = 14  # first fallback window when a strict date filter finds nothing
 
@@ -163,31 +164,55 @@ def _web_to_evidence(
     return evidence, sources
 
 
-def _evidence_block(evidence: list[dict]) -> str:
+def _format_evidence_entry(item: dict, header: str = "") -> str:
+    origin = "The Guardian" if item.get("type") == "guardian" else item.get("source", "web")
+    return (
+        f"{header}[{item['n']}] {item['headline']} "
+        f"({item['published_at'][:10]}, {origin})\n{item['text']}\n"
+    )
+
+
+def _fill(items: list[dict], budget: int, web_header: bool = False) -> tuple[list[str], int]:
     lines: list[str] = []
     used = 0
     current_group = None
-    for item in evidence:
+    for item in items:
         header = ""
-        if item["group"] == "web" and current_group != "web":
+        if web_header and current_group is None:
             current_group = "web"
             header = (
                 "--- NON-GUARDIAN WEB SOURCES (supplementary; attribute to the "
                 "named site, never to The Guardian) ---\n"
             )
-        elif item["group"] not in ("default", "web") and item["group"] != current_group:
+        elif not web_header and item["group"] != "default" and item["group"] != current_group:
             current_group = item["group"]
             header = f"--- Evidence about: {current_group} ---\n"
-        origin = "The Guardian" if item.get("type") == "guardian" else item.get("source", "web")
-        entry = (
-            f"{header}[{item['n']}] {item['headline']} "
-            f"({item['published_at'][:10]}, {origin})\n{item['text']}\n"
-        )
-        if used + len(entry) > MAX_EVIDENCE_CHARS:
+        entry = _format_evidence_entry(item, header)
+        if used + len(entry) > budget:
             break
         lines.append(entry)
         used += len(entry)
-    return "\n".join(lines)
+    return lines, used
+
+
+def _evidence_block(evidence: list[dict]) -> str:
+    """Render evidence within the context cap.
+
+    Guardian and web evidence get separate budgets: Guardian chunks are long
+    and appear first, so a single shared budget silently starved out every web
+    source — the model then never saw the web evidence it was told to cite.
+    """
+    guardian = [e for e in evidence if e.get("type") != "web"]
+    web = [e for e in evidence if e.get("type") == "web"]
+    if not web:
+        lines, _ = _fill(guardian, MAX_EVIDENCE_CHARS)
+        return "\n".join(lines)
+
+    web_budget = min(int(MAX_EVIDENCE_CHARS * WEB_EVIDENCE_SHARE), sum(len(_format_evidence_entry(e)) for e in web) + 200)
+    guardian_lines, guardian_used = _fill(guardian, MAX_EVIDENCE_CHARS - web_budget)
+    # hand any unspent Guardian budget back to the web section
+    web_lines, _ = _fill(web, MAX_EVIDENCE_CHARS - guardian_used, web_header=True)
+    return "\n".join(guardian_lines + web_lines)
 
 
 def build_agent_graph(session: AsyncSession, router_llm=None, synthesis_llm=None):
@@ -221,7 +246,10 @@ def build_agent_graph(session: AsyncSession, router_llm=None, synthesis_llm=None
         if llm is None and settings.openai_api_key:
             llm = get_chat_model(temperature=0, max_tokens=200)
         decision = await decide_source(
-            state["query"], llm=llm, web_available=bool(settings.tavily_api_key)
+            state["query"],
+            llm=llm,
+            web_available=bool(settings.tavily_api_key),
+            today=date.today().isoformat(),
         )
         return {
             "evidence_plan": decision["plan"],

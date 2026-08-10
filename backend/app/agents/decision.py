@@ -18,6 +18,7 @@ collapses to GUARDIAN.
 
 import logging
 import re
+from datetime import date
 
 from app.core.logging import log_event
 from app.llm.client import extract_json, response_text
@@ -41,7 +42,11 @@ Decide where the answer's evidence should come from.
              technical detail, other outlets' coverage, verification).
 
 Respond with JSON only: {{"plan": "GUARDIAN|WEB|BOTH", "web_query": "a short
-web search query, or empty if plan is GUARDIAN", "reason": "one short clause"}}
+keyword web search query, or empty if plan is GUARDIAN", "reason": "one short clause"}}
+
+Rules for web_query: keywords only, no dates, years, months, or words like
+"latest"/"recent" — recency is applied separately by the search engine. Never
+guess a date. Today is {today}.
 
 User question: {question}"""
 
@@ -62,6 +67,22 @@ _NON_NEWS = re.compile(
 )
 
 
+# Models invent stale qualifiers like "October 2023"; recency belongs in the
+# search engine's own date window, never in the keyword query.
+_DATE_TOKENS = re.compile(
+    r"\b(19|20)\d{2}\b|"
+    r"\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b|"
+    r"\b(latest|recent|recently|current|today|yesterday|this week|this month|this year)\b",
+    re.IGNORECASE,
+)
+
+
+def clean_web_query(query: str) -> str:
+    cleaned = _DATE_TOKENS.sub(" ", query)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" ,.?!-")
+    return cleaned
+
+
 def heuristic_plan(question: str) -> str:
     if _EXPLICIT_WEB.search(question):
         return "BOTH"
@@ -70,16 +91,23 @@ def heuristic_plan(question: str) -> str:
     return "GUARDIAN"
 
 
-async def decide_source(question: str, llm=None, web_available: bool = True) -> dict:
+async def decide_source(
+    question: str, llm=None, web_available: bool = True, today: str = ""
+) -> dict:
     """Return {"plan", "web_query", "reason"}. Falls back to heuristics."""
     if not web_available:
         return {"plan": "GUARDIAN", "web_query": "", "reason": "web search not configured"}
 
+    today = today or date.today().isoformat()
     decision: dict | None = None
     if llm is not None:
         try:
             raw = extract_json(
-                response_text(await llm.ainvoke(DECISION_PROMPT.format(question=question[:1000])))
+                response_text(
+                    await llm.ainvoke(
+                        DECISION_PROMPT.format(question=question[:1000], today=today)
+                    )
+                )
             )
             if isinstance(raw, dict) and raw.get("plan") in PLANS:
                 decision = raw
@@ -94,8 +122,11 @@ async def decide_source(question: str, llm=None, web_available: bool = True) -> 
         decision["plan"] = "BOTH"
         decision["reason"] = "user explicitly asked for sources beyond the Guardian"
 
-    if decision["plan"] != "GUARDIAN" and not decision.get("web_query"):
-        decision["web_query"] = question[:200]
+    if decision["plan"] != "GUARDIAN":
+        # strip any invented dates; fall back to the question itself if empty
+        decision["web_query"] = (
+            clean_web_query(decision.get("web_query", "")) or clean_web_query(question[:200])
+        )
 
     log_event(
         logger,
