@@ -20,6 +20,8 @@ class NormalizedArticle(BaseModel):
     trail_text: str = ""
     body_text: str = ""
     tags: list[str] = Field(default_factory=list)
+    # Guardian editorial desk: UK | US | AUS — used to prioritise an edition
+    production_office: str = ""
     source: str = "The Guardian"
     retrieved_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     content_hash: str = ""

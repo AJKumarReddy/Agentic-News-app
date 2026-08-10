@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
-from app.rag.retrieval import recency_boost, rrf_merge
+from app.rag.retrieval import edition_boost, recency_boost, rrf_merge
 from app.rag.vector_store import ScoredChunk
 
 
@@ -39,3 +39,22 @@ def test_recency_boost_handles_missing_date():
 def test_recency_boost_handles_naive_datetime():
     naive = datetime.now() - timedelta(days=1)
     assert recency_boost(naive, weight=0.02) >= 0.0
+
+
+def test_edition_boost_favours_preferred_desk():
+    assert edition_boost("US", "US", 0.02) == 0.02
+    assert edition_boost("us", "US", 0.02) == 0.02  # case-insensitive
+    assert edition_boost("UK", "US", 0.02) == 0.0
+
+
+def test_edition_boost_is_neutral_without_data_or_preference():
+    assert edition_boost("", "US", 0.02) == 0.0
+    assert edition_boost("US", "", 0.02) == 0.0
+    assert edition_boost(None, "US", 0.02) == 0.0
+
+
+def test_edition_boost_does_not_outrank_relevance():
+    # a nudge, not a filter: a clearly better non-US match must still win
+    us_score = 0.40 + edition_boost("US", "US", 0.02)
+    uk_score = 0.55 + edition_boost("UK", "US", 0.02)
+    assert uk_score > us_score

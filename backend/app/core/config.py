@@ -33,6 +33,11 @@ class Settings(BaseSettings):
 
     rag_initial_top_k: int = 20
     rag_final_top_k: int = 6
+    # Guardian editorial desk to favour in ranking: US | UK | AUS | "" (none).
+    # This is a ranking preference, not a filter — other editions still surface
+    # when they are the better match.
+    preferred_production_office: str = "US"
+    edition_boost: float = 0.02
     chunk_target_tokens: int = 800
     chunk_overlap_tokens: int = 120
     reranker: str = "llm"  # llm | cohere | none

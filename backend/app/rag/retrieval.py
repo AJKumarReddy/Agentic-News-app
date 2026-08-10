@@ -27,6 +27,17 @@ def rrf_merge(result_lists: list[list[ScoredChunk]]) -> dict[int, float]:
     return scores
 
 
+def edition_boost(production_office: str | None, preferred: str, weight: float) -> float:
+    """Favour a Guardian editorial desk (e.g. the US edition).
+
+    A ranking nudge, not a filter: UK/AU reporting still wins when it is the
+    clearly better match, which matters for world news that no US desk covers.
+    """
+    if not preferred or not production_office:
+        return 0.0
+    return weight if production_office.upper() == preferred.upper() else 0.0
+
+
 def recency_boost(published_at: datetime | None, weight: float, half_life_days: float = 7.0) -> float:
     if published_at is None:
         return 0.0
@@ -62,7 +73,16 @@ async def hybrid_retrieve(
         # Recency matters for news; freshness-sensitive queries weight it higher
         weight = 0.02 if freshness else 0.005
         results = [
-            ScoredChunk(chunk=by_id[cid], score=score + recency_boost(by_id[cid].published_at, weight))
+            ScoredChunk(
+                chunk=by_id[cid],
+                score=score
+                + recency_boost(by_id[cid].published_at, weight)
+                + edition_boost(
+                    getattr(by_id[cid], "production_office", ""),
+                    settings.preferred_production_office,
+                    settings.edition_boost,
+                ),
+            )
             for cid, score in fused.items()
         ]
         results.sort(key=lambda s: s.score, reverse=True)
