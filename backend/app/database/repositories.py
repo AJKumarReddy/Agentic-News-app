@@ -66,18 +66,25 @@ class ConversationRepository:
     def __init__(self, session: AsyncSession):
         self.session = session
 
-    async def create(self, title: str = "New chat") -> Conversation:
-        conversation = Conversation(title=title[:256])
+    async def create(self, title: str = "New chat", user_id: str = "") -> Conversation:
+        conversation = Conversation(title=title[:256], user_id=user_id[:64])
         self.session.add(conversation)
         await self.session.flush()
         return conversation
 
-    async def get(self, conversation_id: str) -> Conversation | None:
-        return await self.session.get(Conversation, conversation_id)
+    async def get(self, conversation_id: str, user_id: str = "") -> Conversation | None:
+        """Fetch a conversation, but only for the client that owns it."""
+        conversation = await self.session.get(Conversation, conversation_id)
+        if conversation is not None and conversation.user_id != user_id:
+            return None
+        return conversation
 
-    async def list_recent(self, limit: int = 20) -> list[Conversation]:
+    async def list_recent(self, user_id: str = "", limit: int = 20) -> list[Conversation]:
         result = await self.session.execute(
-            select(Conversation).order_by(Conversation.updated_at.desc()).limit(limit)
+            select(Conversation)
+            .where(Conversation.user_id == user_id)
+            .order_by(Conversation.updated_at.desc())
+            .limit(limit)
         )
         return list(result.scalars())
 

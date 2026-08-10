@@ -39,6 +39,10 @@ async def init_db() -> None:
                 "USING hnsw (embedding vector_cosine_ops)"
             )
         )
+        # migration for tables created before conversations.user_id existed
+        await conn.execute(
+            text("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS user_id VARCHAR(64) DEFAULT ''")
+        )
     logger.info("Database initialized")
 
 

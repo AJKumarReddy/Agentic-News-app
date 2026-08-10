@@ -34,10 +34,14 @@ export default function ChatPage({ onConversationChange }: { onConversationChang
       .catch(() => undefined);
   }, [requestedConversation, conversationId, setConversationId, setMessages]);
 
-  // Handle navigation state: new chat, or prefilled "Ask AI" question
+  // Handle navigation state: new chat, or prefilled "Ask AI" question.
+  // The ref guards against double-fire: StrictMode re-runs effects in dev,
+  // and history.replaceState doesn't update the router's location.state.
+  const handledNavState = useRef<unknown>(null);
   useEffect(() => {
     const state = location.state as { newChat?: number; prefill?: string; articleId?: string } | null;
-    if (!state) return;
+    if (!state || handledNavState.current === location.state) return;
+    handledNavState.current = location.state;
     if (state.newChat) reset();
     if (state.prefill) {
       // articleId travels with the first message; the server persists it as

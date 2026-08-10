@@ -69,11 +69,13 @@ async def _prepare(
     message: str,
     conversation_id: str | None,
     article_id: str | None,
+    client_id: str = "",
 ):
     repo = ConversationRepository(session)
-    conversation = await repo.get(conversation_id) if conversation_id else None
+    # ownership-checked: another client's conversation id starts a fresh chat
+    conversation = await repo.get(conversation_id, user_id=client_id) if conversation_id else None
     if conversation is None:
-        conversation = await repo.create(title=message[:60])
+        conversation = await repo.create(title=message[:60], user_id=client_id)
     state = conversation.state or default_conversation_state()
     if article_id:
         state["active_article_id"] = article_id
@@ -87,11 +89,12 @@ async def chat_once(
     message: str,
     conversation_id: str | None = None,
     article_id: str | None = None,
+    client_id: str = "",
 ) -> dict[str, Any]:
     """Non-streaming chat used by tests, evaluation, and stream=false clients."""
     message = sanitize_user_text(message)
     repo, conversation, conv_state, summary = await _prepare(
-        session, message, conversation_id, article_id
+        session, message, conversation_id, article_id, client_id
     )
     with Timer() as timer:
         final = await run_agent(session, message, conv_state, summary)
@@ -115,12 +118,13 @@ async def chat_stream(
     message: str,
     conversation_id: str | None = None,
     article_id: str | None = None,
+    client_id: str = "",
 ) -> AsyncGenerator[str, None]:
     """SSE generator streaming pipeline status and answer tokens."""
     message = sanitize_user_text(message)
     try:
         repo, conversation, conv_state, summary = await _prepare(
-            session, message, conversation_id, article_id
+            session, message, conversation_id, article_id, client_id
         )
         yield _sse("state", {"conversation_id": conversation.id})
 

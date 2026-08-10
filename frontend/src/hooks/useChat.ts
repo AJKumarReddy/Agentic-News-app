@@ -8,6 +8,9 @@ export function useChat() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // synchronous re-entry guard: state updates are async, so two rapid send()
+  // calls would both see busy=false and stream into the same bubble
+  const busyRef = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
   // token deltas are coalesced so a long answer doesn't trigger a re-render per token
   const pendingTokens = useRef('');
@@ -16,7 +19,8 @@ export function useChat() {
   const send = useCallback(
     async (text: string, articleId?: string | null) => {
       const trimmed = text.trim();
-      if (!trimmed || busy) return;
+      if (!trimmed || busyRef.current) return;
+      busyRef.current = true;
       setBusy(true);
       setMessages((prev) => [
         ...prev,
@@ -87,10 +91,11 @@ export function useChat() {
       } finally {
         flushTokens();
         updateAssistant((m) => ({ ...m, status: undefined, streaming: false }));
+        busyRef.current = false;
         setBusy(false);
       }
     },
-    [busy, conversationId],
+    [conversationId],
   );
 
   const stop = useCallback(() => abortRef.current?.abort(), []);
@@ -99,6 +104,7 @@ export function useChat() {
     abortRef.current?.abort();
     setMessages([]);
     setConversationId(null);
+    busyRef.current = false;
     setBusy(false);
   }, []);
 

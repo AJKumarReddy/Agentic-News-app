@@ -158,37 +158,30 @@ def build_agent_graph(session: AsyncSession, router_llm=None, synthesis_llm=None
         }
 
     async def fetch_fresh_node(state: AgentState) -> dict[str, Any]:
-        """Freshness path: query the Guardian API first, index unseen articles."""
+        """Freshness path: query the Guardian API first, index unseen articles.
+        An active article (from "Ask AI about this article") is always fetched
+        and indexed too, regardless of how the intent was classified."""
         intent = state.get("intent", "")
         conv = state.get("conversation_state", {})
-        indexed = 0
-        found = 0
 
-        if intent == "ARTICLE_QA" and conv.get("active_article_id"):
-            article = await tools.get_guardian_article(conv["active_article_id"])
-            if article:
-                stats = await tools.index_guardian_articles(session, [article])
-                indexed = stats["indexed"] + stats["updated"]
-                found = 1
-        else:
-            queries = list(state.get("search_queries", []))
-            if intent == "COMPARISON" and state.get("entities"):
-                queries = state["entities"][:3]
-            order_by = "newest" if state.get("freshness") or intent == "LATEST_NEWS" else "relevance"
-            stats = await tools.fetch_and_index(
-                session,
-                queries,
-                from_date=state.get("from_date"),
-                to_date=state.get("to_date"),
-                section=state.get("section"),
-                order_by=order_by,
-            )
-            indexed = stats["indexed"] + stats["updated"]
-            found = stats["found"]
+        queries = list(state.get("search_queries", []))
+        if intent == "COMPARISON" and state.get("entities"):
+            queries = state["entities"][:3]
+        order_by = "newest" if state.get("freshness") or intent == "LATEST_NEWS" else "relevance"
+        active_id = conv.get("active_article_id")
 
+        stats = await tools.fetch_and_index(
+            session,
+            queries,
+            article_ids=[active_id] if active_id else None,
+            from_date=state.get("from_date"),
+            to_date=state.get("to_date"),
+            section=state.get("section"),
+            order_by=order_by,
+        )
         return {
-            "guardian_found": found,
-            "articles_indexed": indexed,
+            "guardian_found": stats["found"],
+            "articles_indexed": stats["indexed"] + stats["updated"],
             **_advance(state, "fetch_fresh"),
         }
 
