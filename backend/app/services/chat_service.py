@@ -85,6 +85,11 @@ async def _prepare(
     history = [{"role": m.role, "content": m.content} for m in previous]
 
     await repo.add_message(conversation, "user", message)
+    # Commit before the agent runs so the conversation is visible immediately:
+    # the client refreshes its chat list on the 'state' event, which arrives
+    # long before the answer finishes. It also preserves the user's message
+    # if generation later fails.
+    await session.commit()
     return repo, conversation, state, history
 
 
