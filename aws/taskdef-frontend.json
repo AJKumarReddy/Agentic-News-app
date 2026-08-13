@@ -12,12 +12,20 @@
       "image": "<ACCOUNT_ID>.dkr.ecr.<REGION>.amazonaws.com/guardian-frontend:latest",
       "essential": true,
       "portMappings": [{ "containerPort": 80, "protocol": "tcp" }],
+      "healthCheck": {
+        "command": ["CMD-SHELL", "wget -q -O /dev/null http://localhost/ || exit 1"],
+        "interval": 30,
+        "timeout": 5,
+        "retries": 3,
+        "startPeriod": 10
+      },
       "logConfiguration": {
         "logDriver": "awslogs",
         "options": {
           "awslogs-group": "/ecs/guardian-frontend",
           "awslogs-region": "<REGION>",
-          "awslogs-stream-prefix": "frontend"
+          "awslogs-stream-prefix": "frontend",
+          "awslogs-create-group": "true"
         }
       }
     }

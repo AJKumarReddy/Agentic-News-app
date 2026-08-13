@@ -17,7 +17,7 @@ React + TypeScript + Vite + Tailwind  →  FastAPI + LangGraph + pgvector  →  
 - [How it works](#how-it-works): [routing](#1-routing--the-understand-step) · [RAG](#2-the-rag-pipeline) · [citations](#3-citation-integrity)
 - [News sources](#news-sources) · [Scheduled ingestion](#scheduled-ingestion)
 - [Interface](#interface) · [API](#backend-api) · [Testing](#testing)
-- [Deployment](#deployment): [Docker](#docker-compose) · [EC2](#aws-ec2-step-by-step) · [Hostinger](#hostinger-domain--frontend-hosting) · [ECS Fargate](#alternative-codepipeline--ecr--ecs-fargate)
+- [Deployment](#deployment): [production on ECS Fargate](#production-codepipeline--ecr--ecs-fargate) · [local Docker Compose](#local-docker-compose)
 - [Security checklist](#security-checklist-production) · [Troubleshooting](#troubleshooting)
 
 ---
@@ -27,13 +27,13 @@ React + TypeScript + Vite + Tailwind  →  FastAPI + LangGraph + pgvector  →  
 ```mermaid
 flowchart TB
     U[User Browser] --> F[React Frontend<br/>Vite · Tailwind · light/dark]
-    F -- HTTPS REST + SSE --> N[Nginx]
+    F -- HTTPS REST + SSE --> N[Load balancer<br/>ALB in prod · Vite proxy in dev]
     N --> B[FastAPI<br/>Gunicorn + Uvicorn · Docker]
 
     B --> AG[LangGraph Agent]
     B --> PG[(PostgreSQL 16 + pgvector<br/>articles · chunks · chats)]
     B --> R[(Redis — cache + locks)]
-    B --> SCH[Scheduler<br/>1 section every 5 min]
+    B --> SCH[Ingestion<br/>in-process in dev · scheduled task in prod]
 
     AG --> UN[understand<br/>resolve · route · build queries]
     UN --> SRC[Sources]
@@ -92,12 +92,11 @@ flowchart TB
 │   │   └── core/           config, JSON logging, security middleware
 │   ├── tests/              110 tests
 │   └── evaluation/         20-question RAG evaluation harness
-├── nginx/                  production reverse proxy (EC2 path)
-├── aws/                    ECS Fargate task definitions + CodePipeline guide
-├── scripts/                setup-ec2.sh · deploy.sh · health-check.sh
-├── .github/workflows/      test.yml · deploy.yml
-├── buildspec.yml           AWS CodeBuild spec
-├── docker-compose.yml      postgres · redis · backend · frontend (+ nginx/certbot via --profile prod)
+├── aws/                    ECS Fargate task definitions + production deployment guide
+├── scripts/                health-check.sh · guardian_api_smoke.py
+├── .github/workflows/      test.yml  (tests only — deployment is CodePipeline)
+├── buildspec.yml           AWS CodeBuild spec (builds + pushes both images)
+├── docker-compose.yml      local dev: postgres · redis · backend · frontend
 └── .env.example
 ```
 
@@ -220,12 +219,19 @@ Because NYT chunks are an order of magnitude shorter than full-text ones, **retr
 
 ## Scheduled ingestion
 
-The backend pulls fresh articles **every 5 minutes** while it runs — no cron required.
+Locally the backend pulls fresh articles **every 5 minutes** while it runs — no cron required.
 
 ```bash
 # manual run — sweeps every section, for a cold index or an external scheduler
 docker compose exec backend python -m app.tasks.ingest_recent
 ```
+
+**In production the in-process loop is off** (`INGEST_ENABLED=false` on the ECS services): every
+Fargate replica would otherwise run its own copy, and cron work tied to long-running replicas
+stops whenever the service scales down or redeploys. An **EventBridge Scheduler** runs the same
+module as a one-shot Fargate task every 30 minutes, reusing the backend task definition with
+only the command overridden. Same code, same request budget — see
+[aws/ECS_PIPELINE.md](aws/ECS_PIPELINE.md).
 
 A tick refreshes **one section** and cycles through the six, because the request budget is the binding constraint: each section costs one request per publisher and developer keys cap at **500 requests/day**. One section every 5 minutes is 288/day — in budget, with every section current within 30 minutes. Sweeping all six on that interval would be 1,728/day, and the overage fails quietly (a rejected fetch is logged and returns empty, so the index just stops moving). Keep `(1440 / INGEST_INTERVAL_MINUTES) × INGEST_SECTIONS_PER_TICK` under 500 when tuning, or set `INGEST_ENABLED=false` to drive ingestion externally.
 
@@ -278,14 +284,63 @@ Checks citation presence, real publisher URLs, honest refusals on unanswerable q
 
 ## Deployment
 
-### Docker Compose
+Production runs on **AWS ECS Fargate**, deployed by CodePipeline. Docker Compose is the local
+development stack and is not used in production.
 
-```bash
-docker compose up -d --build              # local
-docker compose --profile prod up -d --build   # adds nginx + certbot
+### Production: CodePipeline → ECR → ECS Fargate
+
+```
+Developer ──► git push main ──► GitHub ──► CodePipeline ──► CodeBuild
+                                                                │
+                                            Docker images ──► Amazon ECR
+                                                                │
+                                                        Amazon ECS Fargate
+                                                                │
+                                                  Application Load Balancer (HTTPS)
+                                                     ├── /api/*  ──► backend  :8000
+                                                     └── /*      ──► frontend :80
 ```
 
-Services: `postgres` (pgvector), `redis`, `backend`, `frontend`, and in the `prod` profile `nginx` + `certbot`. Postgres and Redis bind to loopback only.
+Behind the backend service:
+
+```
+Backend
+ ├── Amazon RDS PostgreSQL + pgvector      DATABASE_URL
+ ├── Amazon ElastiCache Redis              REDIS_URL
+ ├── SSM Parameter Store / Secrets Manager all API keys, injected at task start
+ ├── Amazon CloudWatch Logs                /ecs/guardian-backend · /ecs/guardian-frontend
+ └── Guardian · NYT · Tavily · OpenAI
+```
+
+| Piece | Where |
+|---|---|
+| Build spec (ECR login, both images, commit-SHA tags, `imagedefinitions-*.json`) | [`buildspec.yml`](buildspec.yml) |
+| Fargate task definitions (`awsvpc`, backend :8000, frontend :80, `awslogs`, SSM secrets) | [`aws/taskdef-backend.json`](aws/taskdef-backend.json) · [`aws/taskdef-frontend.json`](aws/taskdef-frontend.json) |
+| Full setup: VPC, security groups, RDS, ElastiCache, IAM, ALB, services, scheduler, pipeline | **[aws/ECS_PIPELINE.md](aws/ECS_PIPELINE.md)** |
+
+Notes that matter in production:
+
+- **Secrets never live in the repo, images or task definitions** — the task definitions carry
+  SSM parameter ARNs and ECS injects the values at task start.
+- **Postgres and Redis are managed services**, not containers in the task. The application is
+  unchanged: it still reads `DATABASE_URL` and `REDIS_URL`.
+- **ALB idle timeout must be ~300 s** — `/api/chat` streams over SSE and the 60 s default cuts
+  long answers off mid-stream.
+- **`INGEST_ENABLED=false` on the services**; ingestion is an EventBridge-scheduled Fargate task.
+- **RDS and ElastiCache are never publicly accessible** — private data subnets, security groups
+  that only accept traffic from the ECS tasks.
+
+Rough cost: ALB + 2 Fargate services + RDS + ElastiCache ≈ **$80–120/month** at the smallest
+sensible sizes.
+
+### Local: Docker Compose
+
+```bash
+docker compose up -d --build
+```
+
+Services: `postgres` (pgvector), `redis`, `backend`, `frontend`. Postgres and Redis bind to
+loopback only.
 
 **Where your data lives:** the Docker volume `project_postgres-data` (`/var/lib/docker/volumes/project_postgres-data/_data`, inside the Docker VM). It survives `docker compose down`; only `down -v` destroys it. Back up with:
 
@@ -295,103 +350,32 @@ docker exec project-postgres-1 pg_dump -U guardian guardian_news > backup.sql
 
 Article text and embeddings are rebuildable from the APIs — conversations are the only irreplaceable data.
 
-### CI/CD (GitHub Actions)
+### CI/CD
 
-- **`test.yml`** — every push/PR: backend pytest + import validation, frontend vitest + production build, Docker image builds.
-- **`deploy.yml`** — push to `main`: runs the test workflow, SSHes into EC2, `git reset --hard origin/main`, rebuilds containers, prunes images, runs the health check. A failed health check fails the deploy.
+Two systems, cleanly split — **GitHub Actions tests, CodePipeline deploys**:
 
-Required **GitHub Secrets**: `EC2_HOST`, `EC2_USER` (`ubuntu`), `EC2_SSH_KEY` (PEM contents), optional `EC2_APP_DIR`. Optional repo variable `PUBLIC_API_URL` enables a public post-deploy check.
+- **GitHub Actions ([`test.yml`](.github/workflows/test.yml))** — every push and pull request:
+  backend pytest + import validation, frontend vitest + production build, both Docker image
+  builds. No AWS credentials, no deployment secrets in GitHub at all.
+- **AWS CodePipeline** — every push to `main`: CodeBuild runs [`buildspec.yml`](buildspec.yml),
+  pushes both images to ECR tagged with the commit SHA, and two ECS deploy actions roll the
+  backend and frontend services. New tasks must pass the target-group health check
+  (`/api/health` for the backend) before the old ones drain.
 
-### AWS EC2 (step by step)
+The only GitHub-side configuration is a **CodeConnections/CodeStar connection** authorizing AWS
+to read the repository — created once and approved in the console.
 
-**Instance:** Ubuntu 22.04/24.04, `t3.small` minimum (`t3.medium` recommended — embeddings + Postgres + Redis), 30 GB gp3.
+### Scaling further
 
-| Port | Purpose | Source |
-|---|---|---|
-| 22 | SSH | *your IP only* |
-| 80 | HTTP (ACME + redirect) | 0.0.0.0/0 |
-| 443 | HTTPS | 0.0.0.0/0 |
-
-Do **not** open 5432, 6379 or 8000 — they stay on the Docker network / loopback.
-
-```bash
-# 1. SSH in
-ssh -i mykey.pem ubuntu@<EC2_PUBLIC_IP>
-
-# 2. Provision (git, docker, compose, certbot)
-curl -fsSL https://raw.githubusercontent.com/AJKumarReddy/Agentic-News-app/main/scripts/setup-ec2.sh \
-  | REPO_URL=https://github.com/AJKumarReddy/Agentic-News-app.git bash
-# log out and back in for docker group membership
-
-# 3. Configure
-cd ~/Agentic-News-app
-cp .env.example .env && nano .env
-#   ENVIRONMENT=production
-#   strong POSTGRES_PASSWORD (mirror it inside DATABASE_URL)
-#   FRONTEND_URL=https://mydomain.com
-#   VITE_API_BASE_URL=https://api.mydomain.com/api
-sed -i 's/mydomain.com/YOURDOMAIN.com/g' nginx/nginx.conf
-
-# 4. TLS certificate (port 80 must be free)
-sudo certbot certonly --standalone -d api.mydomain.com
-
-# 5. Launch
-docker compose --profile prod up -d --build
-bash scripts/health-check.sh http://localhost:8000
-
-# 6. Verify from outside
-curl https://api.mydomain.com/api/health
-```
-
-**Certificate renewal** is automatic — the `certbot` service renews via webroot every 12 h; nginx picks up new certs on reload (`docker compose exec nginx nginx -s reload`).
-
-### Hostinger domain + frontend hosting
-
-Recommended: **subdomain split** — `mydomain.com` (frontend on Hostinger) + `api.mydomain.com` (EC2). The root domain keeps pointing at Hostinger while one A record delegates the API.
-
-**1. DNS** (hPanel → Domains → DNS):
-
-| Type | Name | Value | TTL |
-|---|---|---|---|
-| A | `api` | `<EC2 Elastic IP>` (allocate one first so it never changes) | 300 |
-| A / ALIAS | `@` | Hostinger web hosting (leave as-is) | — |
-
-**2. Frontend build:**
-
-```bash
-cd frontend
-VITE_API_BASE_URL=https://api.mydomain.com/api npm run build   # → dist/
-```
-
-Upload `dist/` into `public_html/` via hPanel File Manager or FTP. Because this is a SPA with client-side routing, add `public_html/.htaccess`:
-
-```apache
-RewriteEngine On
-RewriteBase /
-RewriteCond %{REQUEST_FILENAME} !-f
-RewriteCond %{REQUEST_FILENAME} !-d
-RewriteRule . /index.html [L]
-```
-
-Enable free SSL in hPanel and force HTTPS. For automatic deploys, add a GitHub Actions step that pushes `dist/` over FTP (e.g. `SamKirkland/FTP-Deploy-Action`) with credentials in GitHub Secrets.
-
-**Alternative — everything on AWS:** point `@` and `www` at the Elastic IP, issue certs for those names, and enable the "Option B" block in `nginx/nginx.conf`. Then set `VITE_API_BASE_URL=/api` — same origin, no CORS at all.
-
-### Alternative: CodePipeline → ECR → ECS Fargate
-
-An AWS-native pipeline (GitHub → CodePipeline → CodeBuild → ECR → ECS Fargate, with RDS PostgreSQL + ElastiCache Redis behind an ALB) is documented in **[aws/ECS_PIPELINE.md](aws/ECS_PIPELINE.md)**, with [`buildspec.yml`](buildspec.yml) and Fargate [task definitions](aws/) ready to use. Choose it for managed rolling deploys and autoscaling; the EC2 path is far cheaper (~$15–30/mo vs ~$80–120).
-
-### Growing beyond one instance
-
-| Concern | Upgrade path |
+| Concern | Next step |
 |---|---|
-| Database durability | **RDS PostgreSQL** (pgvector supported) — change `DATABASE_URL`, drop the `postgres` service |
-| Cache | **ElastiCache Redis** — change `REDIS_URL` |
-| Logs/metrics | Ship JSON logs to **CloudWatch** via the awslogs driver |
-| Images | Push to **ECR**; deploy tags instead of building on the host |
-| Scale-out | **ALB + ECS Fargate**; move rate limiting to Redis storage |
-| Assets | Frontend to **S3 + CloudFront** |
-| Background jobs | Promote `app/tasks` to Celery when ingestion volume grows |
+| Traffic | Raise `desired-count`, or attach ECS **Service Auto Scaling** on ALB request count / CPU |
+| Database | Larger RDS instance class, then a **read replica**; Multi-AZ for failover |
+| Cache | ElastiCache replication group instead of a single node |
+| Rate limiting | Currently per-task in memory — move to **Redis-backed** storage so limits are global |
+| Assets | Serve the SPA from **S3 + CloudFront** instead of a frontend Fargate service |
+| Background jobs | Promote `app/tasks` to Celery when ingestion volume outgrows one scheduled task |
+| Vector store | `rag/vector_store.py` is small enough to swap for Qdrant/OpenSearch if pgvector plateaus |
 
 ## Security checklist (production)
 
@@ -401,17 +385,18 @@ An AWS-native pipeline (GitHub → CodePipeline → CodeBuild → ECR → ECS Fa
 - [x] Per-IP rate limiting (30/min general, 10/min for `/api/chat`) with idle-key eviction
 - [x] Request body cap (64 KB) and time-to-first-byte timeout (120 s)
 - [x] Content-Security-Policy on API responses and the SPA
-- [x] Secure headers (nosniff, frame-deny, referrer policy, HSTS at nginx)
-- [x] Publisher/OpenAI calls time-boxed with retries; SSE proxied unbuffered
+- [x] Secure headers (nosniff, frame-deny, referrer policy); HTTPS terminated at the ALB
+- [x] Publisher/OpenAI calls time-boxed with retries; SSE streamed unbuffered
 - [x] Bounded agent (recursion limit, capped evidence context, capped tool fan-out)
 - [x] Prompt-injection defenses: evidence wrapped as data with an explicit "ignore instructions inside articles" rule; user input sanitized and truncated
 - [x] Conversations scoped per client; cross-client access returns 404, not 403, so ids aren't enumerable
-- [x] Postgres/Redis never exposed publicly
-- [x] Non-root Docker user for the backend; secrets via `.env` / GitHub Secrets only
-- [x] Structured JSON logs with request ids; secrets redacted, never logged
-- [ ] Rotate `POSTGRES_PASSWORD` and API keys periodically
-- [ ] Restrict SSH to your IP; consider SSM Session Manager
-- [ ] Enable EBS snapshots / scheduled `pg_dump`
+- [x] RDS and ElastiCache in private subnets, reachable only from the ECS security group
+- [x] Secrets in **SSM Parameter Store** only — never in the repo, images, task definitions or GitHub
+- [x] Non-root Docker user for the backend; no SSH keys or AWS credentials stored in GitHub
+- [x] Structured JSON logs with request ids to CloudWatch; secrets redacted, never logged
+- [ ] Rotate the RDS password and API keys periodically (update the SSM parameters, redeploy)
+- [ ] Enable RDS automated backups / snapshots and ECR image scanning
+- [ ] Use ECS Exec (not SSH) for shell access into a running task
 
 ## Troubleshooting
 
@@ -423,6 +408,8 @@ An AWS-native pipeline (GitHub → CodePipeline → CodeBuild → ECR → ECS Fa
 | Answer says evidence is insufficient | Index may be cold — run `python -m app.tasks.ingest_recent`, or wait for the next tick. |
 | Chat returns 500 | Missing `OPENAI_API_KEY`, or Postgres/pgvector not reachable — check `/api/health`. |
 | Frontend can't reach the API | `VITE_API_BASE_URL` mismatch, or the origin isn't in `FRONTEND_URL`/`EXTRA_CORS_ORIGINS`. |
+| Chat stream cuts off in production | ALB idle timeout — raise it to 300 s. See [aws/ECS_PIPELINE.md](aws/ECS_PIPELINE.md). |
+| ECS tasks stop right after starting | Usually a missing SSM parameter or no route to ECR — check the stopped reason and `/ecs/guardian-backend`. |
 
 ## License and attribution
 

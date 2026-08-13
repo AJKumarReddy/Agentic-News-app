@@ -1,38 +1,102 @@
-# AWS-Native CI/CD: GitHub → CodePipeline → CodeBuild → ECR → ECS Fargate
+# Production deployment: GitHub → CodePipeline → CodeBuild → ECR → ECS Fargate
 
-This guide deploys the Guardian AI News Assistant on serverless containers with a fully managed pipeline. It replaces the EC2 + GitHub Actions flow (which remains available — see README). Pushing to `main` automatically builds both Docker images, pushes them to ECR, and rolls them out to ECS with zero downtime.
+This is **the** production deployment for the Guardian AI News Assistant. Pushing to `main`
+builds both Docker images, pushes them to ECR, and rolls them out to two ECS Fargate services
+behind one Application Load Balancer. Docker Compose remains the local development stack and
+is not used in production.
 
 ```
-GitHub (main) ──► CodePipeline ──► CodeBuild ──► ECR ──► ECS (Fargate)
-                   (source)      (buildspec.yml)          │
-                                                          ▼
-                              ALB ──► frontend service (nginx :80)
-                               └────► backend service (FastAPI :8000, path /api/*)
-                                        │
-                              RDS PostgreSQL (pgvector) + ElastiCache Redis
-                                        │
-                              Secrets from SSM Parameter Store
+Developer ──► git push main ──► GitHub
+                                  │
+                          AWS CodePipeline (source)
+                                  │
+                          AWS CodeBuild (buildspec.yml)
+                                  │
+                          Docker build ──► Amazon ECR
+                                             ├── guardian-backend
+                                             └── guardian-frontend
+                                  │
+                          Amazon ECS Fargate
+                             ├── guardian-backend service  (FastAPI + Gunicorn/Uvicorn :8000)
+                             └── guardian-frontend service (nginx SPA :80)
+                                  │
+                          Application Load Balancer (HTTPS)
+                             ├── /api/*  ──► backend  :8000
+                             └── /*      ──► frontend :80
+                                  │
+                                Users
 ```
 
-**Cost note:** this stack (ALB + 2 Fargate services + RDS + ElastiCache) runs roughly $80–120/month minimum — the single-EC2 docker-compose path in the README is far cheaper. Choose Fargate when you want managed scaling, rolling deploys, and no server maintenance.
+Supporting services behind the backend:
 
-Set two shell variables used throughout (run in CloudShell or a configured terminal):
+```
+ECS backend task
+   ├── Amazon RDS PostgreSQL + pgvector      (DATABASE_URL)
+   ├── Amazon ElastiCache Redis              (REDIS_URL)
+   ├── SSM Parameter Store / Secrets Manager (all API keys)
+   ├── Amazon CloudWatch Logs                (/ecs/guardian-*)
+   └── External APIs — Guardian · NYT · Tavily · OpenAI
+```
+
+**Cost note:** ALB + 2 Fargate services + RDS + ElastiCache runs roughly **$80–120/month**
+minimum. Scale `desired-count`, the RDS instance class and the ElastiCache node type down for
+a demo environment.
+
+Set two shell variables used throughout (CloudShell or a configured terminal):
 
 ```bash
-export AWS_REGION=us-east-1
+export AWS_REGION=us-east-1          # any region — nothing here is region-locked
 export ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 ```
 
-## 1. ECR repositories
+---
+
+## 1. Networking
+
+Recommended layout — three subnet tiers across two Availability Zones:
+
+```
+VPC (10.0.0.0/16)
+├── Public subnets        (2 AZs)  → Application Load Balancer, NAT Gateway
+├── Private app subnets   (2 AZs)  → ECS Fargate tasks (backend, frontend, ingest)
+└── Private data subnets  (2 AZs)  → RDS PostgreSQL, ElastiCache Redis
+```
+
+Security groups — each references the one above it, never a CIDR:
+
+```
+Internet ──443──► SG_ALB
+SG_ALB   ──8000──► SG_ECS   (backend tasks)
+SG_ALB   ──80────► SG_ECS   (frontend tasks)
+SG_ECS   ──5432──► SG_DATA  (RDS)
+SG_ECS   ──6379──► SG_DATA  (ElastiCache)
+```
+
+* `SG_ALB` inbound: 443 (and 80 only to redirect to 443) from `0.0.0.0/0`.
+* `SG_ECS` inbound: 8000 and 80 **from `SG_ALB` only**.
+* `SG_DATA` inbound: 5432 and 6379 **from `SG_ECS` only**.
+* **RDS and ElastiCache must never be publicly accessible** — no public subnet, no public IP,
+  `--no-publicly-accessible`.
+
+Tasks in private subnets need a **NAT Gateway** to reach ECR, OpenAI, Guardian, NYT and Tavily
+(≈$32/mo). The cheaper alternative is to place tasks in public subnets with
+`assignPublicIp=ENABLED` and no NAT; the security groups above still keep them unreachable from
+the internet. VPC endpoints for ECR/S3/CloudWatch/SSM are a third option that removes egress
+cost for the AWS calls but not for the external APIs.
+
+## 2. ECR repositories
 
 ```bash
 aws ecr create-repository --repository-name guardian-backend  --image-scanning-configuration scanOnPush=true
 aws ecr create-repository --repository-name guardian-frontend --image-scanning-configuration scanOnPush=true
 ```
 
-## 2. Data layer (replaces the postgres/redis containers)
+Repository names are configurable in `buildspec.yml` via `BACKEND_REPOSITORY` /
+`FRONTEND_REPOSITORY`.
 
-**RDS PostgreSQL with pgvector** (engine 15.4+/16 supports `CREATE EXTENSION vector`):
+## 3. Data layer (RDS + ElastiCache)
+
+**RDS PostgreSQL with pgvector** — engine 15.4+/16 supports `CREATE EXTENSION vector`:
 
 ```bash
 aws rds create-db-instance \
@@ -43,7 +107,8 @@ aws rds create-db-instance \
   --master-username guardian --master-user-password '<STRONG_PASSWORD>' \
   --db-name guardian_news \
   --no-publicly-accessible \
-  --vpc-security-group-ids <SG_DATABASE>
+  --db-subnet-group-name <PRIVATE_DATA_SUBNET_GROUP> \
+  --vpc-security-group-ids <SG_DATA>
 ```
 
 **ElastiCache Redis:**
@@ -53,17 +118,24 @@ aws elasticache create-cache-cluster \
   --cache-cluster-id guardian-redis \
   --engine redis --cache-node-type cache.t4g.micro \
   --num-cache-nodes 1 \
-  --security-group-ids <SG_DATABASE>
+  --cache-subnet-group-name <PRIVATE_DATA_SUBNET_GROUP> \
+  --security-group-ids <SG_DATA>
 ```
 
-Security groups: `SG_DATABASE` must allow inbound 5432 and 6379 **only from the ECS tasks' security group**. Nothing public. The backend creates the `vector` extension and tables automatically at startup (the RDS master user has that privilege).
+The backend creates the `vector` extension and its tables on startup, so no migration step is
+needed — the RDS master user has `CREATE EXTENSION` privilege. Application code is unchanged:
+it reads `DATABASE_URL` and `REDIS_URL` exactly as it does under Docker Compose.
 
-## 3. Secrets in SSM Parameter Store
+## 4. Secrets in SSM Parameter Store
 
-The task definition injects these as container secrets — they never appear in the repo, images, or task definition JSON in plaintext:
+Secrets exist **only** in Parameter Store. They are never in the repo, the Dockerfiles, the
+images, `buildspec.yml`, or the task definition JSON — the task definitions carry parameter
+ARNs, and ECS injects the values as environment variables at task start.
 
 ```bash
 aws ssm put-parameter --name /guardian-app/GUARDIAN_API_KEY --type SecureString --value '<key>'
+aws ssm put-parameter --name /guardian-app/NYT_API_KEY      --type SecureString --value '<key>'
+aws ssm put-parameter --name /guardian-app/TAVILY_API_KEY   --type SecureString --value '<key>'
 aws ssm put-parameter --name /guardian-app/OPENAI_API_KEY   --type SecureString --value '<key>'
 aws ssm put-parameter --name /guardian-app/DATABASE_URL     --type SecureString \
   --value 'postgresql+asyncpg://guardian:<STRONG_PASSWORD>@<RDS_ENDPOINT>:5432/guardian_news'
@@ -71,10 +143,18 @@ aws ssm put-parameter --name /guardian-app/REDIS_URL        --type SecureString 
   --value 'redis://<ELASTICACHE_ENDPOINT>:6379/0'
 ```
 
-## 4. IAM roles
+> Every parameter referenced by a task definition must exist, or the task fails to start with
+> `ResourceInitializationError`. NYT and Tavily are optional features — if you are not using
+> them, **delete those two entries from the `secrets` array** in `aws/taskdef-backend.json`
+> rather than creating empty parameters (SSM rejects empty values).
+
+Secrets Manager works identically: put the secret ARN in `valueFrom` (append `:key::` to pick
+one JSON key) and grant `secretsmanager:GetSecretValue` instead of `ssm:GetParameters`.
+
+## 5. IAM roles
 
 ```bash
-# Execution role: pulls images, reads SSM secrets, writes logs
+# Execution role — ECS agent: pulls images, reads SSM parameters, writes logs
 aws iam create-role --role-name guardianEcsExecutionRole \
   --assume-role-policy-document '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"ecs-tasks.amazonaws.com"},"Action":"sts:AssumeRole"}]}'
 aws iam attach-role-policy --role-name guardianEcsExecutionRole \
@@ -82,12 +162,38 @@ aws iam attach-role-policy --role-name guardianEcsExecutionRole \
 aws iam put-role-policy --role-name guardianEcsExecutionRole --policy-name ReadGuardianSecrets \
   --policy-document "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":[\"ssm:GetParameters\"],\"Resource\":\"arn:aws:ssm:$AWS_REGION:$ACCOUNT_ID:parameter/guardian-app/*\"}]}"
 
-# Task role: what the app itself may call (nothing AWS-side needed today)
+# Task role — what the application itself may call (nothing AWS-side today)
 aws iam create-role --role-name guardianEcsTaskRole \
   --assume-role-policy-document '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"ecs-tasks.amazonaws.com"},"Action":"sts:AssumeRole"}]}'
 ```
 
-## 5. ECS cluster, log groups, task definitions
+Other roles created later in this guide:
+
+| Role | Trusted by | Needs |
+|---|---|---|
+| `guardianEcsExecutionRole` | `ecs-tasks.amazonaws.com` | `AmazonECSTaskExecutionRolePolicy` + `ssm:GetParameters` on `/guardian-app/*` |
+| `guardianEcsTaskRole` | `ecs-tasks.amazonaws.com` | nothing today — the app makes no AWS API calls |
+| CodeBuild service role | `codebuild.amazonaws.com` | `ecr:GetAuthorizationToken`, `ecr:BatchCheckLayerAvailability`, `ecr:InitiateLayerUpload`, `ecr:UploadLayerPart`, `ecr:CompleteLayerUpload`, `ecr:PutImage`, `sts:GetCallerIdentity`, CloudWatch Logs, S3 artifact bucket |
+| CodePipeline service role | `codepipeline.amazonaws.com` | `codestar-connections:UseConnection`, `codebuild:StartBuild`/`BatchGetBuilds`, `ecs:DescribeServices`/`UpdateService`/`RegisterTaskDefinition`, `iam:PassRole` for the task roles, S3 artifact bucket |
+| `guardianSchedulerRole` | `scheduler.amazonaws.com` | `ecs:RunTask` on the backend task definition + `iam:PassRole` for `guardianEcsExecutionRole` and `guardianEcsTaskRole` |
+
+The scheduler role policy in full:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    { "Effect": "Allow", "Action": "ecs:RunTask", "Resource": "arn:aws:ecs:<REGION>:<ACCOUNT_ID>:task-definition/guardian-backend:*" },
+    { "Effect": "Allow", "Action": "iam:PassRole", "Resource": [
+        "arn:aws:iam::<ACCOUNT_ID>:role/guardianEcsExecutionRole",
+        "arn:aws:iam::<ACCOUNT_ID>:role/guardianEcsTaskRole"
+      ],
+      "Condition": { "StringLike": { "iam:PassedToService": "ecs-tasks.amazonaws.com" } } }
+  ]
+}
+```
+
+## 6. Cluster, CloudWatch log groups, task definitions
 
 ```bash
 aws ecs create-cluster --cluster-name guardian-cluster \
@@ -95,16 +201,39 @@ aws ecs create-cluster --cluster-name guardian-cluster \
 
 aws logs create-log-group --log-group-name /ecs/guardian-backend
 aws logs create-log-group --log-group-name /ecs/guardian-frontend
+aws logs put-retention-policy --log-group-name /ecs/guardian-backend  --retention-in-days 30
+aws logs put-retention-policy --log-group-name /ecs/guardian-frontend --retention-in-days 30
+```
 
-# Fill in <ACCOUNT_ID> and <REGION> inside both files first
+Both task definitions use the **`awslogs`** driver into those groups. The backend emits
+structured JSON logs with request ids, so CloudWatch Logs Insights can query them directly:
+
+```
+fields @timestamp, event, route, latency_ms, request_id | filter event = "chat_complete" | sort @timestamp desc
+```
+
+Register the task definitions — fill in your account and region first (the files ship with
+`<ACCOUNT_ID>` / `<REGION>` placeholders so no account or region is committed):
+
+```bash
 sed -i "s/<ACCOUNT_ID>/$ACCOUNT_ID/g; s/<REGION>/$AWS_REGION/g" aws/taskdef-backend.json aws/taskdef-frontend.json
+# also replace <YOUR_DOMAIN> in taskdef-backend.json with the public site origin (CORS)
 aws ecs register-task-definition --cli-input-json file://aws/taskdef-backend.json
 aws ecs register-task-definition --cli-input-json file://aws/taskdef-frontend.json
 ```
 
-## 6. Application Load Balancer
+Both are `FARGATE` / `awsvpc`; the backend exposes **8000** (Gunicorn managing Uvicorn workers)
+and the frontend **80** (nginx serving the SPA build). Neither contains a PostgreSQL or Redis
+sidecar — those are RDS and ElastiCache. The backend sets **`INGEST_ENABLED=false`**: see §9.
 
-One ALB, path-based routing: `/api/*` → backend target group (port 8000), everything else → frontend target group (port 80).
+The `image` value in each file is a bootstrap placeholder. CodePipeline's ECS deploy action
+overwrites it on every deployment with the immutable commit-SHA tag from
+`imagedefinitions-*.json`, registering a new task definition revision each time.
+
+## 7. Application Load Balancer
+
+One ALB, path-based routing: `/api/*` → backend target group (8000), everything else →
+frontend target group (80).
 
 ```bash
 aws elbv2 create-load-balancer --name guardian-alb --type application \
@@ -117,7 +246,7 @@ aws elbv2 create-target-group --name guardian-tg-backend --protocol HTTP --port 
 aws elbv2 create-target-group --name guardian-tg-frontend --protocol HTTP --port 80 \
   --vpc-id <VPC_ID> --target-type ip --health-check-path /
 
-# HTTPS listener (request/import a certificate in ACM first)
+# HTTPS listener — request or import a certificate in ACM first
 aws elbv2 create-listener --load-balancer-arn <ALB_ARN> --protocol HTTPS --port 443 \
   --certificates CertificateArn=<ACM_CERT_ARN> \
   --default-actions Type=forward,TargetGroupArn=<TG_FRONTEND_ARN>
@@ -125,86 +254,145 @@ aws elbv2 create-listener --load-balancer-arn <ALB_ARN> --protocol HTTPS --port 
 aws elbv2 create-rule --listener-arn <HTTPS_LISTENER_ARN> --priority 10 \
   --conditions Field=path-pattern,Values='/api/*' \
   --actions Type=forward,TargetGroupArn=<TG_BACKEND_ARN>
+
+# Port 80 → 443 redirect
+aws elbv2 create-listener --load-balancer-arn <ALB_ARN> --protocol HTTP --port 80 \
+  --default-actions '[{"Type":"redirect","RedirectConfig":{"Protocol":"HTTPS","Port":"443","StatusCode":"HTTP_301"}}]'
 ```
 
-**SSE streaming:** raise the ALB idle timeout so long chat streams aren't cut off:
+**Backend health check: `/api/health`.** It reports the database, the `vector` extension, the
+cache and each publisher, so an unhealthy dependency fails the target check and blocks a bad
+rollout.
+
+**SSE streaming — raise the idle timeout.** `/api/chat` streams tokens over Server-Sent Events;
+the ALB's default 60 s idle timeout cuts long answers off mid-stream. Set **300 seconds**:
 
 ```bash
 aws elbv2 modify-load-balancer-attributes --load-balancer-arn <ALB_ARN> \
   --attributes Key=idle_timeout.timeout_seconds,Value=300
 ```
 
-`SG_ALB` allows 80/443 from the internet; the ECS tasks' security group allows 8000 and 80 **only from SG_ALB**.
+Also give the backend target group a deregistration delay long enough for in-flight streams to
+finish during a rolling deploy:
 
-DNS: in Hostinger, point `mydomain.com` (and/or `api.mydomain.com`) at the ALB with a **CNAME** to the ALB DNS name (root domains need ALIAS support or a `www` redirect; with Route 53 you'd use an ALIAS A record).
+```bash
+aws elbv2 modify-target-group-attributes --target-group-arn <TG_BACKEND_ARN> \
+  --attributes Key=deregistration_delay.timeout_seconds,Value=120
+```
 
-## 7. ECS services
+**DNS:** point the domain at the ALB — a Route 53 ALIAS A record, or a CNAME to the ALB DNS
+name with any other registrar (root domains need ALIAS/ANAME support or a `www` redirect).
+
+## 8. ECS services
 
 ```bash
 aws ecs create-service --cluster guardian-cluster --service-name guardian-backend \
-  --task-definition guardian-backend --desired-count 1 --launch-type FARGATE \
-  --network-configuration "awsvpcConfiguration={subnets=[<PRIVATE_SUBNET_A>,<PRIVATE_SUBNET_B>],securityGroups=[<SG_TASKS>],assignPublicIp=ENABLED}" \
+  --task-definition guardian-backend --desired-count 2 --launch-type FARGATE \
+  --network-configuration "awsvpcConfiguration={subnets=[<PRIVATE_APP_SUBNET_A>,<PRIVATE_APP_SUBNET_B>],securityGroups=[<SG_ECS>],assignPublicIp=DISABLED}" \
   --load-balancers "targetGroupArn=<TG_BACKEND_ARN>,containerName=backend,containerPort=8000" \
-  --health-check-grace-period-seconds 60
+  --health-check-grace-period-seconds 60 \
+  --deployment-configuration "minimumHealthyPercent=100,maximumPercent=200"
 
 aws ecs create-service --cluster guardian-cluster --service-name guardian-frontend \
-  --task-definition guardian-frontend --desired-count 1 --launch-type FARGATE \
-  --network-configuration "awsvpcConfiguration={subnets=[<PRIVATE_SUBNET_A>,<PRIVATE_SUBNET_B>],securityGroups=[<SG_TASKS>],assignPublicIp=ENABLED}" \
+  --task-definition guardian-frontend --desired-count 2 --launch-type FARGATE \
+  --network-configuration "awsvpcConfiguration={subnets=[<PRIVATE_APP_SUBNET_A>,<PRIVATE_APP_SUBNET_B>],securityGroups=[<SG_ECS>],assignPublicIp=DISABLED}" \
   --load-balancers "targetGroupArn=<TG_FRONTEND_ARN>,containerName=frontend,containerPort=80"
 ```
 
-(`assignPublicIp=ENABLED` lets tasks in public subnets reach ECR/OpenAI/Guardian without a NAT gateway — the cheap option. For private subnets, add a NAT gateway and disable public IPs.)
+`assignPublicIp=DISABLED` requires the NAT Gateway from §1. Without one, use public subnets and
+`assignPublicIp=ENABLED` — the security groups still block inbound traffic that is not from the
+ALB.
 
-## 8. The pipeline
+## 9. Scheduled ingestion (EventBridge Scheduler → RunTask)
 
-**a. Connect GitHub** (one-time, needs a browser approval):
+The in-process scheduler is **disabled in production** (`INGEST_ENABLED=false` in
+`aws/taskdef-backend.json`). Its Redis lock keeps concurrent Gunicorn workers from duplicating
+pulls, but relying on long-running replicas to run cron work means ingestion stops whenever the
+service scales to zero and restarts on every deploy. A scheduled one-shot task is explicit and
+independent of replica count.
+
+Note the interval. The in-process scheduler ticks every 5 minutes and refreshes **one** section
+per tick; invoking the module directly sweeps **all six** sections. Running it every 30 minutes
+lands on the same ~288 requests/day per publisher, inside the 500/day developer cap.
+
+```bash
+aws scheduler create-schedule --name guardian-ingest \
+  --schedule-expression "rate(30 minutes)" \
+  --flexible-time-window Mode=OFF \
+  --target '{
+    "Arn":"arn:aws:ecs:'$AWS_REGION':'$ACCOUNT_ID':cluster/guardian-cluster",
+    "RoleArn":"arn:aws:iam::'$ACCOUNT_ID':role/guardianSchedulerRole",
+    "EcsParameters":{
+      "TaskDefinitionArn":"arn:aws:ecs:'$AWS_REGION':'$ACCOUNT_ID':task-definition/guardian-backend",
+      "LaunchType":"FARGATE",
+      "NetworkConfiguration":{"awsvpcConfiguration":{
+        "Subnets":["<PRIVATE_APP_SUBNET_A>","<PRIVATE_APP_SUBNET_B>"],
+        "SecurityGroups":["<SG_ECS>"],
+        "AssignPublicIp":"DISABLED"}}
+    },
+    "Input":"{\"containerOverrides\":[{\"name\":\"backend\",\"command\":[\"python\",\"-m\",\"app.tasks.ingest_recent\"]}]}"
+  }'
+```
+
+It **reuses the backend task definition** — same image, same secrets, same log group — with
+only the command overridden, so the ingest job can never drift from the API it feeds. Runs
+appear under the `/ecs/guardian-backend` log group; each finishes with a
+`scheduled_ingest_complete` event.
+
+`guardianSchedulerRole` needs exactly `ecs:RunTask` and `iam:PassRole` (policy in §5).
+
+## 10. The pipeline
+
+**a. Connect GitHub** (one-time, requires browser approval):
 
 ```bash
 aws codestar-connections create-connection --provider-type GitHub --connection-name guardian-github
-# Then: Console → Developer Tools → Connections → "guardian-github" → Update pending connection → authorize the AJKumarReddy/Agentic-News-app repo
+# Console → Developer Tools → Connections → "guardian-github" → Update pending connection
+# → authorize the AJKumarReddy/Agentic-News-app repository
 ```
 
 **b. CodeBuild project** — Console → CodeBuild → Create project:
-- Source: none needed here (CodePipeline provides it)
-- Environment: Amazon Linux 2023 standard image, **Privileged = ON** (Docker builds)
+- Source: none (CodePipeline supplies it)
+- Environment: Amazon Linux 2023 standard image, **Privileged = ON** (required for Docker)
 - Buildspec: *use the repository's `buildspec.yml`*
-- Service role: allow the ECR push actions listed at the top of `buildspec.yml`
+- Service role: the ECR/logs permissions listed in §5
+- Optional environment variable overrides: `BACKEND_REPOSITORY`, `FRONTEND_REPOSITORY`,
+  `VITE_API_BASE_URL`, `AWS_ACCOUNT_ID` (otherwise resolved via `sts:GetCallerIdentity`)
 
 **c. CodePipeline** — Console → CodePipeline → Create pipeline:
-1. **Source stage**: connection `guardian-github`, repo `AJKumarReddy/Agentic-News-app`, branch `main`, output artifact `SourceOutput`.
-2. **Build stage**: the CodeBuild project above, output artifact `BuildOutput`.
-3. **Deploy stage** with **two actions**, both provider *Amazon ECS*:
-   - `deploy-backend`: cluster `guardian-cluster`, service `guardian-backend`, image definitions file `imagedefinitions-backend.json`, input `BuildOutput`
-   - `deploy-frontend`: cluster `guardian-cluster`, service `guardian-frontend`, image definitions file `imagedefinitions-frontend.json`, input `BuildOutput`
+1. **Source**: connection `guardian-github`, repo `AJKumarReddy/Agentic-News-app`, branch
+   `main`, output artifact `SourceOutput`.
+2. **Build**: the CodeBuild project above, output artifact `BuildOutput`.
+3. **Deploy** — two actions, both provider *Amazon ECS*, both running in parallel:
+   - `deploy-backend`: cluster `guardian-cluster`, service `guardian-backend`,
+     image definitions file `imagedefinitions-backend.json`, input `BuildOutput`
+   - `deploy-frontend`: cluster `guardian-cluster`, service `guardian-frontend`,
+     image definitions file `imagedefinitions-frontend.json`, input `BuildOutput`
 
-Every push to `main` now triggers: build → ECR push → rolling ECS deployment (new tasks must pass the `/api/health` target-group check before old tasks drain).
+Every push to `main` now runs: build both images → push to ECR under the commit SHA → rolling
+ECS deployment. New tasks must pass the target-group health check before the old ones drain.
 
-## 9. Disable the GitHub Actions EC2 deploy (optional)
+GitHub Actions still runs `test.yml` on every push and pull request (backend pytest, frontend
+vitest, both Docker builds) — CodeBuild does not run the test suites, so that remains the test
+gate.
 
-If Fargate becomes your only deployment target, delete `.github/workflows/deploy.yml` or scope it to a tag. Keep `test.yml` — CodeBuild builds images but doesn't run the test suites; GitHub Actions remains your test gate on every push/PR.
-
-## 10. Scheduled ingestion on ECS
-
-Replace the EC2 cron with a scheduled Fargate task. Note the interval: the
-in-process scheduler ticks every 5 minutes but refreshes one section per tick,
-whereas invoking the module directly sweeps **all** sections, so it runs on the
-slower interval to land on the same ~288 requests/day per publisher. Set
-`INGEST_ENABLED=false` on the service tasks so the two don't both ingest.
+## 11. Verify
 
 ```bash
-aws scheduler create-schedule --name guardian-ingest --schedule-expression "rate(30 minutes)" \
-  --flexible-time-window Mode=OFF \
-  --target '{"Arn":"arn:aws:ecs:'$AWS_REGION':'$ACCOUNT_ID':cluster/guardian-cluster","RoleArn":"arn:aws:iam::'$ACCOUNT_ID':role/guardianSchedulerRole","EcsParameters":{"TaskDefinitionArn":"guardian-backend","LaunchType":"FARGATE","NetworkConfiguration":{"awsvpcConfiguration":{"Subnets":["<PRIVATE_SUBNET_A>"],"SecurityGroups":["<SG_TASKS>"],"AssignPublicIp":"ENABLED"}}},"Input":"{\"containerOverrides\":[{\"name\":\"backend\",\"command\":[\"python\",\"-m\",\"app.tasks.ingest_recent\"]}]}"}'
+curl -sf https://<YOUR_DOMAIN>/api/health | jq
+bash scripts/health-check.sh https://<YOUR_DOMAIN>
+aws logs tail /ecs/guardian-backend --follow
 ```
-
-(`guardianSchedulerRole` needs `ecs:RunTask` + `iam:PassRole` for the two task roles.)
 
 ## Troubleshooting
 
 | Symptom | Check |
 |---|---|
-| Tasks stuck `PROVISIONING`→`STOPPED` | Stopped reason in ECS console: usually can't pull image (no route to ECR — public IP/NAT) or can't read SSM parameters (execution role policy) |
-| Target group unhealthy | Backend takes ~20s to boot; grace period 60s is set. Check `/ecs/guardian-backend` logs in CloudWatch |
-| `database "connected": false` in `/api/health` | SG_DATABASE must allow 5432 from SG_TASKS; verify DATABASE_URL parameter |
-| Chat stream cuts off | ALB idle timeout (step 6) |
-| Pipeline deploy hangs | Service events tab — usually failing health checks roll back the deployment |
+| Tasks go `PROVISIONING` → `STOPPED` | Stopped reason in the ECS console: usually no route to ECR (missing NAT/public IP) or `ResourceInitializationError` reading SSM (execution role policy, or a parameter that doesn't exist) |
+| Target group unhealthy | Backend takes ~20 s to boot; the 60 s grace period covers it. Check `/ecs/guardian-backend` in CloudWatch |
+| `"database": {"connected": false}` in `/api/health` | `SG_DATA` must allow 5432 from `SG_ECS`; verify the `DATABASE_URL` parameter and that RDS is in the same VPC |
+| Chat stream cuts off mid-answer | ALB idle timeout — set it to 300 s (§7) |
+| Index stops updating | The scheduled task: EventBridge Scheduler history, then `scheduled_ingest_complete` events in `/ecs/guardian-backend` |
+| Both service tasks *and* the scheduled task ingest | `INGEST_ENABLED` is not `false` on the service task definition |
+| Pipeline deploy hangs | ECS service Events tab — failing health checks roll the deployment back |
+| CORS errors in the browser | `FRONTEND_URL` in the backend task definition must match the public origin exactly |

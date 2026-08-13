@@ -5,7 +5,7 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
-  workflow_call:  # reused by deploy.yml as a pre-deploy gate
+  workflow_call:  # reusable as a gate by other workflows
 
 jobs:
   backend:
