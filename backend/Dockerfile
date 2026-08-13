@@ -22,7 +22,9 @@ USER appuser
 
 EXPOSE 8000
 
-# Gunicorn managing Uvicorn workers — persistent API service for EC2
+# Gunicorn managing Uvicorn workers — long-running API service.
+# Overridden by ECS containerOverrides for the scheduled ingestion task:
+#   command: ["python", "-m", "app.tasks.ingest_recent"]
 CMD ["gunicorn", "app.main:app", \
      "--workers", "2", \
      "--worker-class", "uvicorn.workers.UvicornWorker", \

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Smoke-check any running deployment (local compose, or the ALB DNS name).
 # Usage: health-check.sh [base_url] [attempts] [delay_seconds]
 set -euo pipefail
 

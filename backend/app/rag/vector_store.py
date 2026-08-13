@@ -2,7 +2,8 @@
 
 pgvector was chosen over Qdrant/Pinecone for the initial deployment: one
 PostgreSQL instance serves both relational data and vectors, which keeps a
-single-EC2 deployment simple, cheap, and transactional. The interface below
+deployment simple, cheap, and transactional — one RDS instance in production,
+one container locally, no extra service either way. The interface below
 is small enough to reimplement against Qdrant later if scale demands it.
 """
 
