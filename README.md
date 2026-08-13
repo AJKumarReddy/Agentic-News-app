@@ -28,7 +28,7 @@ React + TypeScript + Vite + Tailwind  →  FastAPI + LangGraph + pgvector  →  
 flowchart TB
     U[User Browser] --> F[React Frontend<br/>Vite · Tailwind · light/dark]
     F -- HTTPS REST + SSE --> N[Load balancer<br/>ALB in prod · Vite proxy in dev]
-    N --> B[FastAPI<br/>Gunicorn + Uvicorn · Docker]
+    N --> B[FastAPI<br/>Gunicorn + Uvicorn<br/>Fargate in prod · container in dev]
 
     B --> AG[LangGraph Agent]
     B --> PG[(PostgreSQL 16 + pgvector<br/>articles · chunks · chats)]
@@ -56,7 +56,7 @@ flowchart TB
 
 | Decision | Choice | Why |
 |---|---|---|
-| Vector DB | **PostgreSQL + pgvector** | One database serves relational data *and* vectors — simplest, cheapest and transactional on a single instance. `rag/vector_store.py` is small enough to swap for Qdrant if scale demands it. |
+| Vector DB | **PostgreSQL + pgvector** | One database serves relational data *and* vectors — no second service to run, and writes stay transactional. One container locally, one RDS instance in production. `rag/vector_store.py` is small enough to swap for Qdrant if scale demands it. |
 | Agent | **LangGraph, four modes** | `understand` resolves the message, then routes to ARTICLE / NEWS / WEB / BOTH. Each mode does only its own work, so an article question never touches the search machinery. Bounded and debuggable — no runaway autonomy. |
 | Query resolution | **Resolve before searching** | Follow-ups ("search youtube for related news", "now do a google search") are rewritten against the conversation *first*. Searching the raw words was the single largest source of wrong answers. |
 | Multi-source | **Adapter per publisher** | Every source returns the same `NormalizedArticle`, so retrieval, chunking, citations and the UI are source-agnostic. Adding a newsroom is one adapter. |
@@ -90,7 +90,7 @@ flowchart TB
 │   │   ├── services/       chat orchestration/SSE, search, article intelligence, cache
 │   │   ├── tasks/          scheduler, ingest_recent, edition backfill
 │   │   └── core/           config, JSON logging, security middleware
-│   ├── tests/              110 tests
+│   ├── tests/              119 tests
 │   └── evaluation/         20-question RAG evaluation harness
 ├── aws/                    ECS Fargate task definitions + production deployment guide
 ├── scripts/                health-check.sh · guardian_api_smoke.py
@@ -138,14 +138,21 @@ Full list in [.env.example](.env.example). The ones that matter:
 | `OPENAI_API_KEY` · `CHAT_MODEL` · `EMBEDDING_MODEL` | generation and embeddings |
 | `TAVILY_API_KEY` | optional web fallback; empty = newsroom-only, no web request ever made |
 | `WEB_SEARCH_THRESHOLD` | newsroom sources at or below this count trigger a web top-up |
-| `DATABASE_URL` · `REDIS_URL` | infrastructure |
-| `INGEST_ENABLED` · `INGEST_INTERVAL_MINUTES` · `INGEST_SECTIONS_PER_TICK` | scheduled pulls (default: on, one section every 5 min — 288 requests/day, under the 500 cap) |
+| `DATABASE_URL` · `REDIS_URL` | infrastructure — containers locally, RDS and ElastiCache in production, same two variables |
+| `INGEST_ENABLED` · `INGEST_INTERVAL_MINUTES` · `INGEST_SECTIONS_PER_TICK` | scheduled pulls (default: on, one section every 5 min — 288 requests/day, under the 500 cap). **Off in production** — see [Scheduled ingestion](#scheduled-ingestion) |
+| `VITE_API_BASE_URL` | build-time arg for the frontend image; `/api` when one ALB serves both services |
 | `PREFERRED_PRODUCTION_OFFICE` · `EDITION_BOOST` | Guardian desk to favour (default `US`) |
 | `RAG_INITIAL_TOP_K` · `RAG_FINAL_TOP_K` | retrieval funnel (20 → 6) |
 | `RERANKER` | `llm` (default) · `cohere` · `none` |
 | `FRONTEND_URL` · `EXTRA_CORS_ORIGINS` | CORS allowlist — never `*` in production |
 | `API_KEY` · `VITE_API_KEY` | optional `X-API-Key` gate for private deployments |
 | `RATE_LIMIT_PER_MINUTE` · `CHAT_RATE_LIMIT_PER_MINUTE` | per-IP budgets (30 / 10) |
+
+Locally these come from `.env`. **In production nothing is read from a file** — the ECS task
+definition lists plain values inline and pulls every secret (`GUARDIAN_API_KEY`, `NYT_API_KEY`,
+`TAVILY_API_KEY`, `OPENAI_API_KEY`, `DATABASE_URL`, `REDIS_URL`) from **SSM Parameter Store** by
+ARN, injected as environment variables at task start. The application code is identical either
+way; only the source of the values changes.
 
 **Never commit** `.env`, API keys, database passwords, AWS credentials or SSH keys — all covered by [.gitignore](.gitignore).
 
@@ -219,23 +226,33 @@ Because NYT chunks are an order of magnitude shorter than full-text ones, **retr
 
 ## Scheduled ingestion
 
-Locally the backend pulls fresh articles **every 5 minutes** while it runs — no cron required.
+The same module keeps the index current in both environments — only the thing that calls it
+changes.
+
+| | Trigger | Interval | Scope per run |
+|---|---|---|---|
+| **Local** | in-process loop inside the backend | 5 minutes | one section, rotating |
+| **Production** | EventBridge Scheduler → one-shot Fargate task | 30 minutes | all six sections |
+
+Either way it lands on **~288 requests/day per publisher**, inside the 500/day developer cap.
 
 ```bash
 # manual run — sweeps every section, for a cold index or an external scheduler
 docker compose exec backend python -m app.tasks.ingest_recent
 ```
 
-**In production the in-process loop is off** (`INGEST_ENABLED=false` on the ECS services): every
-Fargate replica would otherwise run its own copy, and cron work tied to long-running replicas
-stops whenever the service scales down or redeploys. An **EventBridge Scheduler** runs the same
-module as a one-shot Fargate task every 30 minutes, reusing the backend task definition with
-only the command overridden. Same code, same request budget — see
-[aws/ECS_PIPELINE.md](aws/ECS_PIPELINE.md).
-
-A tick refreshes **one section** and cycles through the six, because the request budget is the binding constraint: each section costs one request per publisher and developer keys cap at **500 requests/day**. One section every 5 minutes is 288/day — in budget, with every section current within 30 minutes. Sweeping all six on that interval would be 1,728/day, and the overage fails quietly (a rejected fetch is logged and returns empty, so the index just stops moving). Keep `(1440 / INGEST_INTERVAL_MINUTES) × INGEST_SECTIONS_PER_TICK` under 500 when tuning, or set `INGEST_ENABLED=false` to drive ingestion externally.
+**Locally**, a tick refreshes **one section** and cycles through the six, because the request budget is the binding constraint: each section costs one request per publisher and developer keys cap at **500 requests/day**. One section every 5 minutes is 288/day — in budget, with every section current within 30 minutes. Sweeping all six on that interval would be 1,728/day, and the overage fails quietly (a rejected fetch is logged and returns empty, so the index just stops moving). Keep `(1440 / INGEST_INTERVAL_MINUTES) × INGEST_SECTIONS_PER_TICK` under 500 when tuning.
 
 Under multiple Gunicorn workers a short-lived **Redis lock** ensures exactly one worker performs each run, so publisher API usage isn't multiplied by the worker count. The rotation is derived from the clock rather than in-process state, so every worker resolves the same slice for a tick and a restart resumes the cycle in place. The lock fails open: a Redis outage still ingests rather than silently freezing the index. A failed run is logged and retried on the next tick.
+
+**In production the in-process loop is off** (`INGEST_ENABLED=false` on the ECS services). Every
+Fargate replica would otherwise run its own copy, and cron work tied to long-running replicas
+stops whenever the service scales down or redeploys. **EventBridge Scheduler** instead runs
+`python -m app.tasks.ingest_recent` as a one-shot Fargate task every 30 minutes, reusing the
+backend task definition with only the command overridden — same image, same secrets, same log
+group, so the job can never drift from the API it feeds. Because a direct invocation sweeps all
+six sections, the slower interval lands on the same daily budget. Setup in
+[aws/ECS_PIPELINE.md](aws/ECS_PIPELINE.md).
 
 ## Interface
 
@@ -266,7 +283,7 @@ Chats are scoped to an anonymous per-browser id (`X-Client-Id`), so one visitor 
 ## Testing
 
 ```bash
-cd backend && pytest -q     # 110 tests
+cd backend && pytest -q     # 119 tests
 cd frontend && npm test     # 17 tests
 ```
 
@@ -329,6 +346,17 @@ Notes that matter in production:
 - **`INGEST_ENABLED=false` on the services**; ingestion is an EventBridge-scheduled Fargate task.
 - **RDS and ElastiCache are never publicly accessible** — private data subnets, security groups
   that only accept traffic from the ECS tasks.
+- **The frontend is baked at build time.** CodeBuild passes `VITE_API_BASE_URL` (default `/api`)
+  into the image, so changing the API origin means a rebuild, not an env var flip.
+- **The `image` in each task definition is a placeholder.** The ECS deploy action overwrites it
+  with the commit-SHA tag on every deployment and registers a new revision.
+
+Order for a first deployment: VPC and security groups → ECR → RDS and ElastiCache → SSM
+parameters → IAM roles → cluster, log groups and task definitions → ALB → ECS services →
+scheduled ingestion → the pipeline. Each step is a copy-pasteable block in
+[aws/ECS_PIPELINE.md](aws/ECS_PIPELINE.md). Nothing in the repo hard-codes an account id,
+region, VPC, subnet, security group or ARN — the task definitions ship with `<ACCOUNT_ID>` /
+`<REGION>` placeholders you substitute at register time.
 
 Rough cost: ALB + 2 Fargate services + RDS + ElastiCache ≈ **$80–120/month** at the smallest
 sensible sizes.
