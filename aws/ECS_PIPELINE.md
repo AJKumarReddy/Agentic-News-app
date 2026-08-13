@@ -1,16 +1,16 @@
-# Production deployment: GitHub → CodePipeline → CodeBuild → ECR → ECS Fargate
+# Production deployment: GitHub Actions → ECR → ECS Fargate
 
 This is **the** production deployment for the Guardian AI News Assistant. Pushing to `main`
-builds both Docker images, pushes them to ECR, and rolls them out to two ECS Fargate services
-behind one Application Load Balancer. Docker Compose remains the local development stack and
-is not used in production.
+runs the test suites, builds both Docker images, pushes them to ECR, and rolls them out to two
+ECS Fargate services behind one Application Load Balancer. Docker Compose remains the local
+development stack and is not used in production.
 
 ```
 Developer ──► git push main ──► GitHub
                                   │
-                          AWS CodePipeline (source)
-                                  │
-                          AWS CodeBuild (buildspec.yml)
+                          GitHub Actions
+                             ├── test.yml  (pytest · vitest · docker builds)
+                             └── aws.yml   (deploy — gated on tests)
                                   │
                           Docker build ──► Amazon ECR
                                              ├── guardian-backend
@@ -26,6 +26,10 @@ Developer ──► git push main ──► GitHub
                                   │
                                 Users
 ```
+
+The deploy workflow is [`.github/workflows/aws.yml`](../.github/workflows/aws.yml). It renders
+the task definitions **from this repository**, so environment variables and secret ARNs are
+versioned with the code and ship on the same commit as the image.
 
 Supporting services behind the backend:
 
@@ -45,9 +49,21 @@ a demo environment.
 Set two shell variables used throughout (CloudShell or a configured terminal):
 
 ```bash
-export AWS_REGION=us-east-1          # any region — nothing here is region-locked
+export AWS_REGION=us-east-1          # the region both task definitions are set to
 export ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 ```
+
+> **Region:** `aws/taskdef-backend.json` and `aws/taskdef-frontend.json` are set to
+> **`us-east-1`** — in the ECR image URI, the SSM parameter ARNs and `awslogs-region`. To deploy
+> elsewhere, change `AWS_REGION` above **and** replace the region in both files:
+>
+> ```bash
+> sed -i "s/us-east-1/$AWS_REGION/g" aws/taskdef-backend.json aws/taskdef-frontend.json
+> ```
+>
+> Keep it in step with `AWS_REGION` in `.github/workflows/aws.yml`, which is also `us-east-1`:
+> the workflow pushes to that region's registry, and a mismatch means ECS pulls from a registry
+> the deploy never writes to. Nothing else in the repo is region-locked.
 
 ---
 
@@ -91,8 +107,7 @@ aws ecr create-repository --repository-name guardian-backend  --image-scanning-c
 aws ecr create-repository --repository-name guardian-frontend --image-scanning-configuration scanOnPush=true
 ```
 
-Repository names are configurable in `buildspec.yml` via `BACKEND_REPOSITORY` /
-`FRONTEND_REPOSITORY`.
+Repository names are set per matrix entry (`ecr_repository`) in `.github/workflows/aws.yml`.
 
 ## 3. Data layer (RDS + ElastiCache)
 
@@ -129,7 +144,7 @@ it reads `DATABASE_URL` and `REDIS_URL` exactly as it does under Docker Compose.
 ## 4. Secrets in SSM Parameter Store
 
 Secrets exist **only** in Parameter Store. They are never in the repo, the Dockerfiles, the
-images, `buildspec.yml`, or the task definition JSON — the task definitions carry parameter
+images, the workflow, or the task definition JSON — the task definitions carry parameter
 ARNs, and ECS injects the values as environment variables at task start.
 
 ```bash
@@ -173,8 +188,7 @@ Other roles created later in this guide:
 |---|---|---|
 | `guardianEcsExecutionRole` | `ecs-tasks.amazonaws.com` | `AmazonECSTaskExecutionRolePolicy` + `ssm:GetParameters` on `/guardian-app/*` |
 | `guardianEcsTaskRole` | `ecs-tasks.amazonaws.com` | nothing today — the app makes no AWS API calls |
-| CodeBuild service role | `codebuild.amazonaws.com` | `ecr:GetAuthorizationToken`, `ecr:BatchCheckLayerAvailability`, `ecr:InitiateLayerUpload`, `ecr:UploadLayerPart`, `ecr:CompleteLayerUpload`, `ecr:PutImage`, `sts:GetCallerIdentity`, CloudWatch Logs, S3 artifact bucket |
-| CodePipeline service role | `codepipeline.amazonaws.com` | `codestar-connections:UseConnection`, `codebuild:StartBuild`/`BatchGetBuilds`, `ecs:DescribeServices`/`UpdateService`/`RegisterTaskDefinition`, `iam:PassRole` for the task roles, S3 artifact bucket |
+| GitHub Actions deployer | an IAM user (or an OIDC role — see §10) | ECR push set + `sts:GetCallerIdentity` + `ecs:RegisterTaskDefinition`, `ecs:DescribeServices`, `ecs:UpdateService` + `iam:PassRole` for the two task roles |
 | `guardianSchedulerRole` | `scheduler.amazonaws.com` | `ecs:RunTask` on the backend task definition + `iam:PassRole` for `guardianEcsExecutionRole` and `guardianEcsTaskRole` |
 
 The scheduler role policy in full:
@@ -183,7 +197,7 @@ The scheduler role policy in full:
 {
   "Version": "2012-10-17",
   "Statement": [
-    { "Effect": "Allow", "Action": "ecs:RunTask", "Resource": "arn:aws:ecs:<REGION>:<ACCOUNT_ID>:task-definition/guardian-backend:*" },
+    { "Effect": "Allow", "Action": "ecs:RunTask", "Resource": "arn:aws:ecs:us-east-1:<ACCOUNT_ID>:task-definition/guardian-backend:*" },
     { "Effect": "Allow", "Action": "iam:PassRole", "Resource": [
         "arn:aws:iam::<ACCOUNT_ID>:role/guardianEcsExecutionRole",
         "arn:aws:iam::<ACCOUNT_ID>:role/guardianEcsTaskRole"
@@ -212,11 +226,12 @@ structured JSON logs with request ids, so CloudWatch Logs Insights can query the
 fields @timestamp, event, route, latency_ms, request_id | filter event = "chat_complete" | sort @timestamp desc
 ```
 
-Register the task definitions — fill in your account and region first (the files ship with
-`<ACCOUNT_ID>` / `<REGION>` placeholders so no account or region is committed):
+Register the task definitions. The region is already `us-east-1`; substitute your account id
+(the files ship with an `<ACCOUNT_ID>` placeholder so no account id is committed):
 
 ```bash
-sed -i "s/<ACCOUNT_ID>/$ACCOUNT_ID/g; s/<REGION>/$AWS_REGION/g" aws/taskdef-backend.json aws/taskdef-frontend.json
+sed -i "s/<ACCOUNT_ID>/$ACCOUNT_ID/g" aws/taskdef-backend.json aws/taskdef-frontend.json
+# deploying outside us-east-1? also: sed -i "s/us-east-1/$AWS_REGION/g" aws/taskdef-*.json
 # also replace <YOUR_DOMAIN> in taskdef-backend.json with the public site origin (CORS)
 aws ecs register-task-definition --cli-input-json file://aws/taskdef-backend.json
 aws ecs register-task-definition --cli-input-json file://aws/taskdef-frontend.json
@@ -226,9 +241,9 @@ Both are `FARGATE` / `awsvpc`; the backend exposes **8000** (Gunicorn managing U
 and the frontend **80** (nginx serving the SPA build). Neither contains a PostgreSQL or Redis
 sidecar — those are RDS and ElastiCache. The backend sets **`INGEST_ENABLED=false`**: see §9.
 
-The `image` value in each file is a bootstrap placeholder. CodePipeline's ECS deploy action
-overwrites it on every deployment with the immutable commit-SHA tag from
-`imagedefinitions-*.json`, registering a new task definition revision each time.
+The `image` value in each file is a bootstrap placeholder. The deploy workflow overwrites it on
+every run with the immutable commit-SHA tag and registers a new task definition revision, so
+this manual registration is only needed once — before the services can be created in §8.
 
 ## 7. Application Load Balancer
 
@@ -341,40 +356,85 @@ appear under the `/ecs/guardian-backend` log group; each finishes with a
 
 `guardianSchedulerRole` needs exactly `ecs:RunTask` and `iam:PassRole` (policy in §5).
 
-## 10. The pipeline
+## 10. The deploy workflow
 
-**a. Connect GitHub** (one-time, requires browser approval):
+Deployment is [`.github/workflows/aws.yml`](../.github/workflows/aws.yml) — already in the repo.
+All that remains is giving it credentials.
 
-```bash
-aws codestar-connections create-connection --provider-type GitHub --connection-name guardian-github
-# Console → Developer Tools → Connections → "guardian-github" → Update pending connection
-# → authorize the AJKumarReddy/Agentic-News-app repository
+**a. Deployer IAM policy.** Create a policy with exactly what the workflow does — push images,
+register a task definition, update a service:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    { "Effect": "Allow", "Action": "ecr:GetAuthorizationToken", "Resource": "*" },
+    { "Effect": "Allow",
+      "Action": ["ecr:BatchCheckLayerAvailability","ecr:InitiateLayerUpload","ecr:UploadLayerPart","ecr:CompleteLayerUpload","ecr:PutImage"],
+      "Resource": [
+        "arn:aws:ecr:us-east-1:<ACCOUNT_ID>:repository/guardian-backend",
+        "arn:aws:ecr:us-east-1:<ACCOUNT_ID>:repository/guardian-frontend"
+      ] },
+    { "Effect": "Allow", "Action": "ecs:RegisterTaskDefinition", "Resource": "*" },
+    { "Effect": "Allow",
+      "Action": ["ecs:DescribeServices","ecs:UpdateService"],
+      "Resource": [
+        "arn:aws:ecs:us-east-1:<ACCOUNT_ID>:service/guardian-cluster/guardian-backend",
+        "arn:aws:ecs:us-east-1:<ACCOUNT_ID>:service/guardian-cluster/guardian-frontend"
+      ] },
+    { "Effect": "Allow", "Action": "iam:PassRole",
+      "Resource": [
+        "arn:aws:iam::<ACCOUNT_ID>:role/guardianEcsExecutionRole",
+        "arn:aws:iam::<ACCOUNT_ID>:role/guardianEcsTaskRole"
+      ],
+      "Condition": { "StringLike": { "iam:PassedToService": "ecs-tasks.amazonaws.com" } } }
+  ]
+}
 ```
 
-**b. CodeBuild project** — Console → CodeBuild → Create project:
-- Source: none (CodePipeline supplies it)
-- Environment: Amazon Linux 2023 standard image, **Privileged = ON** (required for Docker)
-- Buildspec: *use the repository's `buildspec.yml`*
-- Service role: the ECR/logs permissions listed in §5
-- Optional environment variable overrides: `BACKEND_REPOSITORY`, `FRONTEND_REPOSITORY`,
-  `VITE_API_BASE_URL`, `AWS_ACCOUNT_ID` (otherwise resolved via `sts:GetCallerIdentity`)
+`ecs:RegisterTaskDefinition` cannot be scoped to a resource — AWS does not support it. The
+`iam:PassRole` entries are what stop that from being an escalation path: the workflow can only
+register task definitions that run as those two roles.
 
-**c. CodePipeline** — Console → CodePipeline → Create pipeline:
-1. **Source**: connection `guardian-github`, repo `AJKumarReddy/Agentic-News-app`, branch
-   `main`, output artifact `SourceOutput`.
-2. **Build**: the CodeBuild project above, output artifact `BuildOutput`.
-3. **Deploy** — two actions, both provider *Amazon ECS*, both running in parallel:
-   - `deploy-backend`: cluster `guardian-cluster`, service `guardian-backend`,
-     image definitions file `imagedefinitions-backend.json`, input `BuildOutput`
-   - `deploy-frontend`: cluster `guardian-cluster`, service `guardian-frontend`,
-     image definitions file `imagedefinitions-frontend.json`, input `BuildOutput`
+**b. Credentials — pick one.**
 
-Every push to `main` now runs: build both images → push to ECR under the commit SHA → rolling
-ECS deployment. New tasks must pass the target-group health check before the old ones drain.
+*OIDC (recommended, no long-lived key):* create an IAM role trusting GitHub's OIDC provider,
+attach the policy above, and swap the credentials step in `aws.yml` for:
 
-GitHub Actions still runs `test.yml` on every push and pull request (backend pytest, frontend
-vitest, both Docker builds) — CodeBuild does not run the test suites, so that remains the test
-gate.
+```yaml
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::<ACCOUNT_ID>:role/guardianGitHubDeployRole
+          aws-region: ${{ env.AWS_REGION }}
+```
+
+and add `id-token: write` to the workflow's `permissions:` block. Scope the role's trust policy
+to this repository:
+
+```json
+"Condition": { "StringEquals": {
+  "token.actions.githubusercontent.com:sub": "repo:AJKumarReddy/Agentic-News-app:ref:refs/heads/main" } }
+```
+
+*Access keys (what the workflow ships with):* create an IAM user with the policy above, then add
+its key as repository secrets **`AWS_ACCESS_KEY_ID`** and **`AWS_SECRET_ACCESS_KEY`** under
+Settings → Secrets and variables → Actions. Rotate them periodically.
+
+**c. Protect the environment (optional).** The deploy job declares `environment: production`.
+Adding required reviewers to that environment in Settings → Environments turns every deploy into
+an approval gate.
+
+**How a deploy runs.** Push to `main` → `test.yml` runs as a reusable workflow (backend pytest,
+frontend vitest, both Docker builds); a failure stops the deploy. Then the matrix job runs once
+per service: build the image from its own context, push it to ECR under the commit SHA, resolve
+`<ACCOUNT_ID>` in the task definition from `sts:GetCallerIdentity`, render the new image into it,
+register the revision, and update the service with `wait-for-service-stability: true`. New tasks
+must pass the target-group health check before the old ones drain.
+
+Because the task definition is rendered from the JSON in this repo, **editing
+`aws/taskdef-*.json` and pushing is how you change environment variables or secret ARNs** — no
+console step.
 
 ## 11. Verify
 
@@ -394,5 +454,7 @@ aws logs tail /ecs/guardian-backend --follow
 | Chat stream cuts off mid-answer | ALB idle timeout — set it to 300 s (§7) |
 | Index stops updating | The scheduled task: EventBridge Scheduler history, then `scheduled_ingest_complete` events in `/ecs/guardian-backend` |
 | Both service tasks *and* the scheduled task ingest | `INGEST_ENABLED` is not `false` on the service task definition |
-| Pipeline deploy hangs | ECS service Events tab — failing health checks roll the deployment back |
+| Deploy job hangs on "service stability" | ECS service Events tab — failing health checks roll the deployment back |
+| Deploy fails on `RegisterTaskDefinition` | Deployer policy missing `ecs:RegisterTaskDefinition` or `iam:PassRole` for the two task roles (§10) |
+| Deploy fails with an invalid-ARN error | `<ACCOUNT_ID>` not substituted — the workflow's "Resolve account id" step needs `sts:GetCallerIdentity` |
 | CORS errors in the browser | `FRONTEND_URL` in the backend task definition must match the public origin exactly |

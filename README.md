@@ -17,7 +17,7 @@ React + TypeScript + Vite + Tailwind  →  FastAPI + LangGraph + pgvector  →  
 - [How it works](#how-it-works): [routing](#1-routing--the-understand-step) · [RAG](#2-the-rag-pipeline) · [citations](#3-citation-integrity)
 - [News sources](#news-sources) · [Scheduled ingestion](#scheduled-ingestion)
 - [Interface](#interface) · [API](#backend-api) · [Testing](#testing)
-- [Deployment](#deployment): [production on ECS Fargate](#production-codepipeline--ecr--ecs-fargate) · [local Docker Compose](#local-docker-compose)
+- [Deployment](#deployment): [production on ECS Fargate](#production-github-actions--ecr--ecs-fargate) · [local Docker Compose](#local-docker-compose)
 - [Security checklist](#security-checklist-production) · [Troubleshooting](#troubleshooting)
 
 ---
@@ -94,8 +94,7 @@ flowchart TB
 │   └── evaluation/         20-question RAG evaluation harness
 ├── aws/                    ECS Fargate task definitions + production deployment guide
 ├── scripts/                health-check.sh · guardian_api_smoke.py
-├── .github/workflows/      test.yml  (tests only — deployment is CodePipeline)
-├── buildspec.yml           AWS CodeBuild spec (builds + pushes both images)
+├── .github/workflows/      test.yml (tests) · aws.yml (build → ECR → ECS deploy)
 ├── docker-compose.yml      local dev: postgres · redis · backend · frontend
 └── .env.example
 ```
@@ -301,13 +300,15 @@ Checks citation presence, real publisher URLs, honest refusals on unanswerable q
 
 ## Deployment
 
-Production runs on **AWS ECS Fargate**, deployed by CodePipeline. Docker Compose is the local
+Production runs on **AWS ECS Fargate**, deployed by GitHub Actions. Docker Compose is the local
 development stack and is not used in production.
 
-### Production: CodePipeline → ECR → ECS Fargate
+### Production: GitHub Actions → ECR → ECS Fargate
 
 ```
-Developer ──► git push main ──► GitHub ──► CodePipeline ──► CodeBuild
+Developer ──► git push main ──► GitHub Actions
+                                    ├── test.yml  (pytest · vitest · docker builds)
+                                    └── aws.yml   (deploy — gated on tests)
                                                                 │
                                             Docker images ──► Amazon ECR
                                                                 │
@@ -331,9 +332,9 @@ Backend
 
 | Piece | Where |
 |---|---|
-| Build spec (ECR login, both images, commit-SHA tags, `imagedefinitions-*.json`) | [`buildspec.yml`](buildspec.yml) |
+| Deploy workflow (build both images, push to ECR, register + roll both services) | [`.github/workflows/aws.yml`](.github/workflows/aws.yml) |
 | Fargate task definitions (`awsvpc`, backend :8000, frontend :80, `awslogs`, SSM secrets) | [`aws/taskdef-backend.json`](aws/taskdef-backend.json) · [`aws/taskdef-frontend.json`](aws/taskdef-frontend.json) |
-| Full setup: VPC, security groups, RDS, ElastiCache, IAM, ALB, services, scheduler, pipeline | **[aws/ECS_PIPELINE.md](aws/ECS_PIPELINE.md)** |
+| Full setup: VPC, security groups, RDS, ElastiCache, IAM, ALB, services, scheduler, deployer policy | **[aws/ECS_PIPELINE.md](aws/ECS_PIPELINE.md)** |
 
 Notes that matter in production:
 
@@ -346,17 +347,22 @@ Notes that matter in production:
 - **`INGEST_ENABLED=false` on the services**; ingestion is an EventBridge-scheduled Fargate task.
 - **RDS and ElastiCache are never publicly accessible** — private data subnets, security groups
   that only accept traffic from the ECS tasks.
-- **The frontend is baked at build time.** CodeBuild passes `VITE_API_BASE_URL` (default `/api`)
-  into the image, so changing the API origin means a rebuild, not an env var flip.
-- **The `image` in each task definition is a placeholder.** The ECS deploy action overwrites it
-  with the commit-SHA tag on every deployment and registers a new revision.
+- **The frontend is baked at build time.** The workflow passes `VITE_API_BASE_URL` (default
+  `/api`) into the image, so changing the API origin means a rebuild, not an env var flip.
+- **The `image` in each task definition is a placeholder.** The deploy overwrites it with the
+  commit-SHA tag on every run and registers a new revision.
+- **Task definitions are versioned with the code.** Changing an env var or secret ARN is an edit
+  to `aws/taskdef-*.json` plus a push — no console step.
 
 Order for a first deployment: VPC and security groups → ECR → RDS and ElastiCache → SSM
 parameters → IAM roles → cluster, log groups and task definitions → ALB → ECS services →
-scheduled ingestion → the pipeline. Each step is a copy-pasteable block in
-[aws/ECS_PIPELINE.md](aws/ECS_PIPELINE.md). Nothing in the repo hard-codes an account id,
-region, VPC, subnet, security group or ARN — the task definitions ship with `<ACCOUNT_ID>` /
-`<REGION>` placeholders you substitute at register time.
+scheduled ingestion → deployer credentials. Each step is a copy-pasteable block in
+[aws/ECS_PIPELINE.md](aws/ECS_PIPELINE.md).
+
+Both task definitions are set to **`us-east-1`** — the ECR image URI, the SSM parameter ARNs and
+`awslogs-region`. Deploying elsewhere is one `sed` over the two files plus `AWS_REGION` in the
+workflow. No account id, VPC, subnet, security group or ARN is committed: the account id stays an
+`<ACCOUNT_ID>` placeholder, substituted at deploy time from `sts:GetCallerIdentity`.
 
 Rough cost: ALB + 2 Fargate services + RDS + ElastiCache ≈ **$80–120/month** at the smallest
 sensible sizes.
@@ -380,18 +386,25 @@ Article text and embeddings are rebuildable from the APIs — conversations are 
 
 ### CI/CD
 
-Two systems, cleanly split — **GitHub Actions tests, CodePipeline deploys**:
+**Tests** — [`test.yml`](.github/workflows/test.yml) runs on every push and pull request: backend
+pytest + import validation, frontend vitest + production build, both Docker image builds.
 
-- **GitHub Actions ([`test.yml`](.github/workflows/test.yml))** — every push and pull request:
-  backend pytest + import validation, frontend vitest + production build, both Docker image
-  builds. No AWS credentials, no deployment secrets in GitHub at all.
-- **AWS CodePipeline** — every push to `main`: CodeBuild runs [`buildspec.yml`](buildspec.yml),
-  pushes both images to ECR tagged with the commit SHA, and two ECS deploy actions roll the
-  backend and frontend services. New tasks must pass the target-group health check
-  (`/api/health` for the backend) before the old ones drain.
+**Deployment** — [`aws.yml`](.github/workflows/aws.yml) on every push to `main`:
 
-The only GitHub-side configuration is a **CodeConnections/CodeStar connection** authorizing AWS
-to read the repository — created once and approved in the console.
+1. `test.yml` runs first as a reusable workflow; a failing test stops the deploy.
+2. A matrix job runs once per service — build the image from its own context, push it to ECR
+   tagged with the commit SHA, render that image into the task definition from `aws/`, register
+   the revision, and update the service.
+3. `wait-for-service-stability` holds the job open until the rollout settles. New tasks must pass
+   the target-group health check (`/api/health` for the backend) before the old ones drain.
+
+Repository secrets required: **`AWS_ACCESS_KEY_ID`** and **`AWS_SECRET_ACCESS_KEY`**, for a
+deployer IAM user scoped to ECR push + `ecs:RegisterTaskDefinition`/`UpdateService` +
+`iam:PassRole` for the two task roles. The exact policy — and the OIDC alternative that removes
+the long-lived key entirely — is in [aws/ECS_PIPELINE.md](aws/ECS_PIPELINE.md) §10.
+
+The deploy job declares `environment: production`, so adding required reviewers to that
+environment in Settings → Environments turns every deploy into an approval gate.
 
 ### Scaling further
 
@@ -420,7 +433,9 @@ to read the repository — created once and approved in the console.
 - [x] Conversations scoped per client; cross-client access returns 404, not 403, so ids aren't enumerable
 - [x] RDS and ElastiCache in private subnets, reachable only from the ECS security group
 - [x] Secrets in **SSM Parameter Store** only — never in the repo, images, task definitions or GitHub
-- [x] Non-root Docker user for the backend; no SSH keys or AWS credentials stored in GitHub
+- [x] Non-root Docker user for the backend; no SSH keys anywhere
+- [x] Deploy credentials scoped to ECR push + those two ECS services, with `iam:PassRole` limited to the two task roles
+- [ ] Swap the deployer access key for GitHub OIDC role assumption (no long-lived key in GitHub)
 - [x] Structured JSON logs with request ids to CloudWatch; secrets redacted, never logged
 - [ ] Rotate the RDS password and API keys periodically (update the SSM parameters, redeploy)
 - [ ] Enable RDS automated backups / snapshots and ECR image scanning
