@@ -9,7 +9,7 @@
   "containerDefinitions": [
     {
       "name": "frontend",
-      "image": "<ACCOUNT_ID>.dkr.ecr.<REGION>.amazonaws.com/guardian-frontend:latest",
+      "image": "<ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/guardian-frontend:latest",
       "essential": true,
       "portMappings": [{ "containerPort": 80, "protocol": "tcp" }],
       "healthCheck": {
@@ -23,7 +23,7 @@
         "logDriver": "awslogs",
         "options": {
           "awslogs-group": "/ecs/guardian-frontend",
-          "awslogs-region": "<REGION>",
+          "awslogs-region": "us-east-1",
           "awslogs-stream-prefix": "frontend",
           "awslogs-create-group": "true"
         }
