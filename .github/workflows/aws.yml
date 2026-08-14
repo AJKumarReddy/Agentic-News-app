@@ -25,7 +25,7 @@ on:
   workflow_dispatch:
 
 env:
-  AWS_REGION: us-east-1
+  AWS_REGION: us-east-2
   ECS_CLUSTER: guardian-cluster
   # Same-origin deployment behind one ALB. Override for split domains.
   VITE_API_BASE_URL: /api
