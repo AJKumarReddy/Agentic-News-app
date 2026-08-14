@@ -10,7 +10,7 @@
   "containerDefinitions": [
     {
       "name": "backend",
-      "image": "<ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/guardian-backend:latest",
+      "image": "<ACCOUNT_ID>.dkr.ecr.us-east-2.amazonaws.com/guardian-backend:latest",
       "essential": true,
       "portMappings": [{ "containerPort": 8000, "protocol": "tcp" }],
       "stopTimeout": 60,
@@ -30,12 +30,12 @@
         { "name": "INGEST_ENABLED", "value": "false" }
       ],
       "secrets": [
-        { "name": "GUARDIAN_API_KEY", "valueFrom": "arn:aws:ssm:us-east-1:<ACCOUNT_ID>:parameter/guardian-app/GUARDIAN_API_KEY" },
-        { "name": "NYT_API_KEY",      "valueFrom": "arn:aws:ssm:us-east-1:<ACCOUNT_ID>:parameter/guardian-app/NYT_API_KEY" },
-        { "name": "TAVILY_API_KEY",   "valueFrom": "arn:aws:ssm:us-east-1:<ACCOUNT_ID>:parameter/guardian-app/TAVILY_API_KEY" },
-        { "name": "OPENAI_API_KEY",   "valueFrom": "arn:aws:ssm:us-east-1:<ACCOUNT_ID>:parameter/guardian-app/OPENAI_API_KEY" },
-        { "name": "DATABASE_URL",     "valueFrom": "arn:aws:ssm:us-east-1:<ACCOUNT_ID>:parameter/guardian-app/DATABASE_URL" },
-        { "name": "REDIS_URL",        "valueFrom": "arn:aws:ssm:us-east-1:<ACCOUNT_ID>:parameter/guardian-app/REDIS_URL" }
+        { "name": "GUARDIAN_API_KEY", "valueFrom": "arn:aws:ssm:us-east-2:<ACCOUNT_ID>:parameter/guardian-app/GUARDIAN_API_KEY" },
+        { "name": "NYT_API_KEY",      "valueFrom": "arn:aws:ssm:us-east-2:<ACCOUNT_ID>:parameter/guardian-app/NYT_API_KEY" },
+        { "name": "TAVILY_API_KEY",   "valueFrom": "arn:aws:ssm:us-east-2:<ACCOUNT_ID>:parameter/guardian-app/TAVILY_API_KEY" },
+        { "name": "OPENAI_API_KEY",   "valueFrom": "arn:aws:ssm:us-east-2:<ACCOUNT_ID>:parameter/guardian-app/OPENAI_API_KEY" },
+        { "name": "DATABASE_URL",     "valueFrom": "arn:aws:ssm:us-east-2:<ACCOUNT_ID>:parameter/guardian-app/DATABASE_URL" },
+        { "name": "REDIS_URL",        "valueFrom": "arn:aws:ssm:us-east-2:<ACCOUNT_ID>:parameter/guardian-app/REDIS_URL" }
       ],
       "healthCheck": {
         "command": ["CMD-SHELL", "curl -sf http://localhost:8000/api/health || exit 1"],
@@ -48,7 +48,7 @@
         "logDriver": "awslogs",
         "options": {
           "awslogs-group": "/ecs/guardian-backend",
-          "awslogs-region": "us-east-1",
+          "awslogs-region": "us-east-2",
           "awslogs-stream-prefix": "backend",
           "awslogs-create-group": "true"
         }

@@ -359,7 +359,7 @@ parameters → IAM roles → cluster, log groups and task definitions → ALB �
 scheduled ingestion → deployer credentials. Each step is a copy-pasteable block in
 [aws/ECS_PIPELINE.md](aws/ECS_PIPELINE.md).
 
-Both task definitions are set to **`us-east-1`** — the ECR image URI, the SSM parameter ARNs and
+Both task definitions are set to **`us-east-2`** — the ECR image URI, the SSM parameter ARNs and
 `awslogs-region`. Deploying elsewhere is one `sed` over the two files plus `AWS_REGION` in the
 workflow. No account id, VPC, subnet, security group or ARN is committed: the account id stays an
 `<ACCOUNT_ID>` placeholder, substituted at deploy time from `sts:GetCallerIdentity`.
