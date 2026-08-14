@@ -49,19 +49,19 @@ a demo environment.
 Set two shell variables used throughout (CloudShell or a configured terminal):
 
 ```bash
-export AWS_REGION=us-east-1          # the region both task definitions are set to
+export AWS_REGION=us-east-2          # the region both task definitions are set to
 export ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 ```
 
 > **Region:** `aws/taskdef-backend.json` and `aws/taskdef-frontend.json` are set to
-> **`us-east-1`** — in the ECR image URI, the SSM parameter ARNs and `awslogs-region`. To deploy
+> **`us-east-2`** — in the ECR image URI, the SSM parameter ARNs and `awslogs-region`. To deploy
 > elsewhere, change `AWS_REGION` above **and** replace the region in both files:
 >
 > ```bash
-> sed -i "s/us-east-1/$AWS_REGION/g" aws/taskdef-backend.json aws/taskdef-frontend.json
+> sed -i "s/us-east-2/$AWS_REGION/g" aws/taskdef-backend.json aws/taskdef-frontend.json
 > ```
 >
-> Keep it in step with `AWS_REGION` in `.github/workflows/aws.yml`, which is also `us-east-1`:
+> Keep it in step with `AWS_REGION` in `.github/workflows/aws.yml`, which is also `us-east-2`:
 > the workflow pushes to that region's registry, and a mismatch means ECS pulls from a registry
 > the deploy never writes to. Nothing else in the repo is region-locked.
 
@@ -197,7 +197,7 @@ The scheduler role policy in full:
 {
   "Version": "2012-10-17",
   "Statement": [
-    { "Effect": "Allow", "Action": "ecs:RunTask", "Resource": "arn:aws:ecs:us-east-1:<ACCOUNT_ID>:task-definition/guardian-backend:*" },
+    { "Effect": "Allow", "Action": "ecs:RunTask", "Resource": "arn:aws:ecs:us-east-2:<ACCOUNT_ID>:task-definition/guardian-backend:*" },
     { "Effect": "Allow", "Action": "iam:PassRole", "Resource": [
         "arn:aws:iam::<ACCOUNT_ID>:role/guardianEcsExecutionRole",
         "arn:aws:iam::<ACCOUNT_ID>:role/guardianEcsTaskRole"
@@ -226,12 +226,12 @@ structured JSON logs with request ids, so CloudWatch Logs Insights can query the
 fields @timestamp, event, route, latency_ms, request_id | filter event = "chat_complete" | sort @timestamp desc
 ```
 
-Register the task definitions. The region is already `us-east-1`; substitute your account id
+Register the task definitions. The region is already `us-east-2`; substitute your account id
 (the files ship with an `<ACCOUNT_ID>` placeholder so no account id is committed):
 
 ```bash
 sed -i "s/<ACCOUNT_ID>/$ACCOUNT_ID/g" aws/taskdef-backend.json aws/taskdef-frontend.json
-# deploying outside us-east-1? also: sed -i "s/us-east-1/$AWS_REGION/g" aws/taskdef-*.json
+# deploying outside us-east-2? also: sed -i "s/us-east-2/$AWS_REGION/g" aws/taskdef-*.json
 # also replace <YOUR_DOMAIN> in taskdef-backend.json with the public site origin (CORS)
 aws ecs register-task-definition --cli-input-json file://aws/taskdef-backend.json
 aws ecs register-task-definition --cli-input-json file://aws/taskdef-frontend.json
@@ -372,15 +372,15 @@ register a task definition, update a service:
     { "Effect": "Allow",
       "Action": ["ecr:BatchCheckLayerAvailability","ecr:InitiateLayerUpload","ecr:UploadLayerPart","ecr:CompleteLayerUpload","ecr:PutImage"],
       "Resource": [
-        "arn:aws:ecr:us-east-1:<ACCOUNT_ID>:repository/guardian-backend",
-        "arn:aws:ecr:us-east-1:<ACCOUNT_ID>:repository/guardian-frontend"
+        "arn:aws:ecr:us-east-2:<ACCOUNT_ID>:repository/guardian-backend",
+        "arn:aws:ecr:us-east-2:<ACCOUNT_ID>:repository/guardian-frontend"
       ] },
     { "Effect": "Allow", "Action": "ecs:RegisterTaskDefinition", "Resource": "*" },
     { "Effect": "Allow",
       "Action": ["ecs:DescribeServices","ecs:UpdateService"],
       "Resource": [
-        "arn:aws:ecs:us-east-1:<ACCOUNT_ID>:service/guardian-cluster/guardian-backend",
-        "arn:aws:ecs:us-east-1:<ACCOUNT_ID>:service/guardian-cluster/guardian-frontend"
+        "arn:aws:ecs:us-east-2:<ACCOUNT_ID>:service/guardian-cluster/guardian-backend",
+        "arn:aws:ecs:us-east-2:<ACCOUNT_ID>:service/guardian-cluster/guardian-frontend"
       ] },
     { "Effect": "Allow", "Action": "iam:PassRole",
       "Resource": [
