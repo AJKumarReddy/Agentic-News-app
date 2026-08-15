@@ -10,7 +10,7 @@ function MessageBubble({ message }: { message: ChatMessage }) {
   if (message.role === 'user') {
     return (
       <div className="flex animate-fade-up justify-end">
-        <div className="max-w-[80%] rounded-2xl rounded-br-md bg-brand-600 px-4 py-2.5 text-[15px] leading-relaxed text-white">
+        <div className="max-w-[88%] [overflow-wrap:anywhere] rounded-2xl rounded-br-md bg-brand-600 px-4 py-2.5 text-[15px] leading-relaxed text-white sm:max-w-[80%]">
           {message.content}
         </div>
       </div>
@@ -19,9 +19,11 @@ function MessageBubble({ message }: { message: ChatMessage }) {
 
   return (
     <div className="flex animate-fade-up justify-start">
-      <div className="w-full max-w-[94%] rounded-2xl rounded-bl-md border border-ink-200 dark:border-ink-700 bg-white dark:bg-ink-800 px-5 py-4 shadow-card">
+      {/* full width below sm: at 360px, 6% plus px-5 was ~40px of the screen
+          spent on padding around an already narrow column of text */}
+      <div className="w-full max-w-full rounded-2xl rounded-bl-md border border-ink-200 dark:border-ink-700 bg-white dark:bg-ink-800 px-4 py-3.5 shadow-card sm:max-w-[94%] sm:px-5 sm:py-4">
         {message.status && (
-          <div className="flex items-center gap-2 py-1 text-sm text-ink-500 dark:text-ink-400 dark:text-ink-500">
+          <div className="flex items-center gap-2 py-1 text-sm text-ink-500 dark:text-ink-400">
             <span className="relative flex h-2 w-2">
               <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent-400 opacity-75" />
               <span className="relative inline-flex h-2 w-2 rounded-full bg-accent-500" />

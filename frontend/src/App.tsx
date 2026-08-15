@@ -10,9 +10,11 @@ export default function App() {
   const [sidebarRefresh, setSidebarRefresh] = useState(0);
   const { theme, setTheme } = useTheme();
   return (
-    <div className="flex h-full">
+    // below md the Sidebar contributes a top bar instead of a rail, so the
+    // shell stacks; from md it is the familiar rail-beside-content row
+    <div className="flex h-full flex-col md:flex-row">
       <Sidebar refreshKey={sidebarRefresh} theme={theme} onSelectTheme={setTheme} />
-      <main className="min-w-0 flex-1">
+      <main className="min-h-0 min-w-0 flex-1">
         <Routes>
           <Route
             path="/"

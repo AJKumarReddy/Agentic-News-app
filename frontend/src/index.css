@@ -8,8 +8,27 @@ body,
   height: 100%;
 }
 
+/* Mobile Chrome's URL bar makes 100% (of 100vh) taller than what is actually
+   visible, which pushes the chat composer under the browser chrome. dvh tracks
+   the bar as it collapses; the 100% above stays as the fallback. */
+@supports (height: 100dvh) {
+  html,
+  body,
+  #root {
+    height: 100dvh;
+  }
+}
+
+html {
+  /* the default grey flash on tap is heavier than our own active states */
+  -webkit-tap-highlight-color: rgba(115, 85, 238, 0.14);
+}
+
 body {
   @apply bg-ink-50 text-ink-900 antialiased transition-colors duration-200;
+  /* nothing scrolls at the body level — this stops pull-to-refresh firing when
+     an inner scroll container is already at the top */
+  overscroll-behavior-y: contain;
 }
 .dark body {
   @apply bg-ink-900 text-ink-100;
@@ -35,6 +54,9 @@ body {
 /* markdown body inside chat bubbles */
 .prose-chat {
   @apply text-[15px] leading-relaxed text-ink-800 dark:text-ink-200;
+  /* an unbroken URL in an answer is wider than a phone — break it rather than
+     letting it stretch the bubble and scroll the whole page sideways */
+  overflow-wrap: anywhere;
 }
 .prose-chat h1,
 .prose-chat h2,
@@ -59,8 +81,26 @@ body {
 .prose-chat li::marker {
   @apply text-ink-400;
 }
+/* a table wide enough to need it scrolls inside its own box (see Markdown.tsx),
+   so the bubble keeps its width on a narrow screen */
+.prose-chat-table {
+  @apply -mx-1 my-3 overflow-x-auto px-1;
+}
 .prose-chat table {
-  @apply my-3 w-full border-collapse overflow-hidden rounded-lg text-sm;
+  @apply w-full border-collapse overflow-hidden rounded-lg text-sm;
+}
+.prose-chat th,
+.prose-chat td {
+  /* cells opt out of the aggressive wrapping above: breaking mid-word in a
+     narrow column is less readable than scrolling the table */
+  overflow-wrap: normal;
+  @apply whitespace-nowrap;
+}
+.prose-chat pre {
+  @apply my-3 overflow-x-auto rounded-lg bg-ink-100 p-3 text-[13px] dark:bg-ink-800;
+}
+.prose-chat pre code {
+  @apply bg-transparent p-0 text-inherit;
 }
 .prose-chat th {
   @apply bg-ink-100 px-3 py-2 text-left font-semibold text-ink-700 dark:bg-ink-700 dark:text-ink-200;

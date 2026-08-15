@@ -1,6 +1,9 @@
 /** @type {import('tailwindcss').Config} */
 export default {
   darkMode: 'class',
+  // hover: variants compile inside @media (hover: hover) — on touch devices a tap
+  // no longer latches a hover state that only a second tap elsewhere clears
+  future: { hoverOnlyWhenSupported: true },
   content: ['./index.html', './src/**/*.{ts,tsx}'],
   theme: {
     extend: {
@@ -85,10 +88,20 @@ export default {
           '0%': { backgroundPosition: '-500px 0' },
           '100%': { backgroundPosition: '500px 0' },
         },
+        'slide-in-left': {
+          '0%': { transform: 'translateX(-100%)' },
+          '100%': { transform: 'translateX(0)' },
+        },
+        'fade-in': {
+          '0%': { opacity: '0' },
+          '100%': { opacity: '1' },
+        },
       },
       animation: {
         'fade-up': 'fade-up 0.25s ease-out',
         shimmer: 'shimmer 1.4s linear infinite',
+        'slide-in-left': 'slide-in-left 0.22s cubic-bezier(0.32, 0.72, 0, 1)',
+        'fade-in': 'fade-in 0.2s ease-out',
       },
     },
   },

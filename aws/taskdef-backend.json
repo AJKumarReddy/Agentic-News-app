@@ -51,7 +51,7 @@
         },
         {
           "name": "FRONTEND_URL",
-          "value": "https://<YOUR_DOMAIN>"
+          "value": "https://www.newsagentai.publicvm.com"
         },
         {
           "name": "RAG_INITIAL_TOP_K",
