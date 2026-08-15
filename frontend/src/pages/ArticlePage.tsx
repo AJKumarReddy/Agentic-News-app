@@ -29,17 +29,21 @@ export default function ArticlePage() {
       .finally(() => setLoading(false));
   }, [articleId]);
 
+  // every branch owns its scroll container — <main> does not scroll, so a
+  // branch that omits this is simply clipped at the fold on a phone
   if (loading) {
     return (
-      <div className="mx-auto max-w-4xl px-4 py-8">
-        <div className="h-8 w-2/3 skeleton rounded" />
-        <div className="mt-4 h-64 skeleton rounded-xl" />
-        <div className="mt-4 space-y-2">
-          {Array.from({ length: 5 }).map((_, i) => (
-            <div key={i} className="h-4 skeleton rounded" />
-          ))}
+      <div className="h-full overflow-y-auto overscroll-contain bg-brand-soft dark:bg-brand-soft-dark">
+        <div className="mx-auto max-w-4xl px-4 py-6 sm:py-8">
+          <div className="h-8 w-2/3 skeleton rounded" />
+          <div className="mt-4 h-64 skeleton rounded-xl" />
+          <div className="mt-4 space-y-2">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <div key={i} className="h-4 skeleton rounded" />
+            ))}
+          </div>
+          <p className="mt-4 text-sm text-ink-500 dark:text-ink-400">Analysing the article…</p>
         </div>
-        <p className="mt-4 text-sm text-ink-500 dark:text-ink-400 dark:text-ink-500">Analysing the article…</p>
       </div>
     );
   }
@@ -53,21 +57,22 @@ export default function ArticlePage() {
     const published = formatArticleDate(passed?.published_at, 'full');
 
     return (
-      <div className="mx-auto max-w-3xl px-4 py-10">
+      <div className="h-full overflow-y-auto overscroll-contain bg-brand-soft dark:bg-brand-soft-dark">
+        <div className="mx-auto max-w-3xl px-4 py-6 pb-[max(2.5rem,env(safe-area-inset-bottom))] sm:py-10">
         <div className="overflow-hidden rounded-xl border border-ink-200 dark:border-ink-700 bg-white dark:bg-ink-800 shadow-card">
           {passed?.thumbnail && (
-            <img src={passed.thumbnail} alt="" className="h-56 w-full object-cover" />
+            <img src={passed.thumbnail} alt="" className="h-44 w-full object-cover sm:h-56" />
           )}
-          <div className="p-7">
+          <div className="p-5 sm:p-7">
             {passed && (
-              <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-ink-500 dark:text-ink-400 dark:text-ink-500">
+              <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-ink-500 dark:text-ink-400">
                 <SourceChip sourceId={passed.source_id} name={passed.source} size="xs" />
                 {passed.section && <span className="font-medium text-ink-600 dark:text-ink-300">{passed.section}</span>}
                 {published && <span>· {published}</span>}
               </div>
             )}
 
-            <h1 className="font-serif text-2xl font-bold leading-snug text-ink-900 dark:text-ink-50">
+            <h1 className="font-serif text-xl font-bold leading-snug text-ink-900 dark:text-ink-50 sm:text-2xl">
               {passed?.headline ?? 'This article can’t be opened here'}
             </h1>
 
@@ -75,18 +80,20 @@ export default function ArticlePage() {
               <p className="mt-3 leading-relaxed text-ink-700 dark:text-ink-200">{passed.trail_text}</p>
             )}
 
-            <div className="mt-5 rounded-lg bg-warm-50 p-3.5 text-[13px] leading-relaxed text-warm-800 dark:text-warm-200">
+            <div className="mt-5 rounded-lg bg-warm-50 p-3.5 text-[13px] leading-relaxed text-warm-800 dark:bg-warm-500/10 dark:text-warm-200">
               {publisher} publishes only headlines and summaries through its API, so the full text
               isn’t available in this app. Read the complete article on the publisher’s site.
             </div>
 
-            <div className="mt-5 flex flex-wrap gap-2">
+            {/* wraps to one full-width button per row on a narrow screen rather
+                than three cramped ones sharing 328px */}
+            <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
               {passed?.url && (
                 <a
                   href={passed.url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-brand-700"
+                  className="inline-flex min-h-[44px] items-center justify-center rounded-lg bg-brand-600 px-4 text-sm font-semibold text-white transition-colors hover:bg-brand-700 sm:min-h-0 sm:py-2"
                 >
                   Read the full article ↗
                 </a>
@@ -102,18 +109,19 @@ export default function ArticlePage() {
                   })
                 }
                 disabled={!passed}
-                className="rounded-lg border border-ink-200 dark:border-ink-700 px-4 py-2 text-sm font-semibold text-ink-700 dark:text-ink-200 transition-colors hover:bg-ink-50 dark:bg-ink-800 disabled:opacity-40"
+                className="inline-flex min-h-[44px] items-center justify-center rounded-lg border border-ink-200 px-4 text-sm font-semibold text-ink-700 transition-colors hover:bg-ink-50 disabled:opacity-40 dark:border-ink-700 dark:text-ink-200 dark:hover:bg-ink-700 sm:min-h-0 sm:py-2"
               >
                 Ask AI about it
               </button>
               <button
                 onClick={() => navigate(-1)}
-                className="rounded-lg border border-ink-200 dark:border-ink-700 px-4 py-2 text-sm font-semibold text-ink-700 dark:text-ink-200 transition-colors hover:bg-ink-50 dark:bg-ink-800"
+                className="inline-flex min-h-[44px] items-center justify-center rounded-lg border border-ink-200 px-4 text-sm font-semibold text-ink-700 transition-colors hover:bg-ink-50 dark:border-ink-700 dark:text-ink-200 dark:hover:bg-ink-700 sm:min-h-0 sm:py-2"
               >
                 Go back
               </button>
             </div>
           </div>
+        </div>
         </div>
       </div>
     );
@@ -123,9 +131,9 @@ export default function ArticlePage() {
   const published = formatArticleDate(article.published_at, 'full');
 
   return (
-    <div className="h-full overflow-y-auto">
-      <div className="mx-auto max-w-4xl px-4 py-8">
-        <div className="flex flex-wrap items-center gap-2 text-xs text-ink-500 dark:text-ink-400 dark:text-ink-500">
+    <div className="h-full overflow-y-auto overscroll-contain bg-brand-soft dark:bg-brand-soft-dark">
+      <div className="mx-auto max-w-4xl px-4 py-6 sm:py-8">
+        <div className="flex flex-wrap items-center gap-2 text-xs text-ink-500 dark:text-ink-400">
           <SourceChip sourceId={article.source_id} name={article.source} size="xs" />
           {article.section && (
             <span className="font-medium text-ink-600 dark:text-ink-300">
@@ -135,19 +143,19 @@ export default function ArticlePage() {
           {published && <span>{published}</span>}
           {article.author && <span>· {article.author}</span>}
         </div>
-        <h1 className="mt-2 font-serif text-3xl font-bold leading-tight text-ink-900 dark:text-ink-50">
+        <h1 className="mt-2 font-serif text-[26px] font-bold leading-tight text-ink-900 dark:text-ink-50 sm:text-3xl">
           {article.headline}
         </h1>
         {article.thumbnail && (
           <img src={article.thumbnail} alt="" className="mt-4 w-full rounded-xl object-cover" />
         )}
 
-        <div className="mt-4 flex flex-wrap gap-2">
+        <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
           <a
             href={article.url}
             target="_blank"
             rel="noopener noreferrer"
-            className="rounded-lg border border-ink-200 dark:border-ink-700 px-4 py-2 text-sm font-semibold text-ink-700 dark:text-ink-200 hover:bg-ink-50 dark:bg-ink-800"
+            className="inline-flex min-h-[44px] items-center justify-center rounded-lg border border-ink-200 px-4 text-sm font-semibold text-ink-700 transition-colors hover:bg-ink-50 dark:border-ink-700 dark:text-ink-200 dark:hover:bg-ink-700 sm:min-h-0 sm:py-2"
           >
             Read the original
           </a>
@@ -160,22 +168,22 @@ export default function ArticlePage() {
                 },
               })
             }
-            className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700"
+            className="inline-flex min-h-[44px] items-center justify-center rounded-lg bg-brand-600 px-4 text-sm font-semibold text-white transition-colors hover:bg-brand-700 sm:min-h-0 sm:py-2"
           >
             Ask AI about this article
           </button>
         </div>
 
         {analysis.summary && (
-          <section className="mt-8 rounded-xl border border-ink-200 dark:border-ink-700 bg-white dark:bg-ink-800 p-5 shadow-card">
-            <h2 className="text-sm font-semibold uppercase tracking-wider text-ink-500 dark:text-ink-400 dark:text-ink-500">AI Summary</h2>
+          <section className="mt-8 rounded-xl border border-ink-200 dark:border-ink-700 bg-white dark:bg-ink-800 p-4 shadow-card sm:p-5">
+            <h2 className="text-sm font-semibold uppercase tracking-wider text-ink-500 dark:text-ink-400">AI Summary</h2>
             <p className="mt-2 leading-relaxed text-ink-800 dark:text-ink-100">{analysis.summary}</p>
           </section>
         )}
 
         {analysis.key_points.length > 0 && (
-          <section className="mt-4 rounded-xl border border-ink-200 dark:border-ink-700 bg-white dark:bg-ink-800 p-5 shadow-card">
-            <h2 className="text-sm font-semibold uppercase tracking-wider text-ink-500 dark:text-ink-400 dark:text-ink-500">Key Points</h2>
+          <section className="mt-4 rounded-xl border border-ink-200 dark:border-ink-700 bg-white dark:bg-ink-800 p-4 shadow-card sm:p-5">
+            <h2 className="text-sm font-semibold uppercase tracking-wider text-ink-500 dark:text-ink-400">Key Points</h2>
             <ul className="mt-2 list-disc space-y-1.5 pl-5 text-ink-800 dark:text-ink-100">
               {analysis.key_points.map((point, i) => (
                 <li key={i}>{point}</li>
@@ -186,8 +194,8 @@ export default function ArticlePage() {
 
         <div className="mt-4 grid gap-4 md:grid-cols-2">
           {analysis.entities.length > 0 && (
-            <section className="rounded-xl border border-ink-200 dark:border-ink-700 bg-white dark:bg-ink-800 p-5 shadow-card">
-              <h2 className="text-sm font-semibold uppercase tracking-wider text-ink-500 dark:text-ink-400 dark:text-ink-500">Entities</h2>
+            <section className="rounded-xl border border-ink-200 dark:border-ink-700 bg-white dark:bg-ink-800 p-4 shadow-card sm:p-5">
+              <h2 className="text-sm font-semibold uppercase tracking-wider text-ink-500 dark:text-ink-400">Entities</h2>
               <div className="mt-2 flex flex-wrap gap-1.5">
                 {analysis.entities.map((entity, i) => (
                   <span key={i} className="rounded-full bg-ink-100 px-2.5 py-1 text-xs text-ink-700 dark:bg-ink-700 dark:text-ink-200">
@@ -198,8 +206,8 @@ export default function ArticlePage() {
             </section>
           )}
           {analysis.topics.length > 0 && (
-            <section className="rounded-xl border border-ink-200 dark:border-ink-700 bg-white dark:bg-ink-800 p-5 shadow-card">
-              <h2 className="text-sm font-semibold uppercase tracking-wider text-ink-500 dark:text-ink-400 dark:text-ink-500">Topics</h2>
+            <section className="rounded-xl border border-ink-200 dark:border-ink-700 bg-white dark:bg-ink-800 p-4 shadow-card sm:p-5">
+              <h2 className="text-sm font-semibold uppercase tracking-wider text-ink-500 dark:text-ink-400">Topics</h2>
               <div className="mt-2 flex flex-wrap gap-1.5">
                 {analysis.topics.map((topic, i) => (
                   <span
@@ -215,8 +223,8 @@ export default function ArticlePage() {
         </div>
 
         {analysis.important_dates.length > 0 && (
-          <section className="mt-4 rounded-xl border border-ink-200 dark:border-ink-700 bg-white dark:bg-ink-800 p-5 shadow-card">
-            <h2 className="text-sm font-semibold uppercase tracking-wider text-ink-500 dark:text-ink-400 dark:text-ink-500">
+          <section className="mt-4 rounded-xl border border-ink-200 dark:border-ink-700 bg-white dark:bg-ink-800 p-4 shadow-card sm:p-5">
+            <h2 className="text-sm font-semibold uppercase tracking-wider text-ink-500 dark:text-ink-400">
               Important Dates
             </h2>
             <ul className="mt-2 space-y-1.5 text-sm text-ink-800 dark:text-ink-100">
@@ -228,8 +236,10 @@ export default function ArticlePage() {
         )}
 
         {related.length > 0 && (
-          <section className="mt-8 pb-10">
-            <h2 className="font-serif text-xl font-bold text-brand-900">Related coverage</h2>
+          <section className="mt-8 pb-[max(2.5rem,env(safe-area-inset-bottom))]">
+            <h2 className="font-serif text-xl font-bold text-brand-900 dark:text-brand-200">
+              Related coverage
+            </h2>
             <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {related.map((r) => (
                 <ArticleCard key={r.article_id} article={r} />

@@ -45,6 +45,12 @@ export default function Markdown({ content, sources }: { content: string; source
           p: ({ children }) => <p>{mapChildren(children)}</p>,
           li: ({ children }) => <li>{mapChildren(children)}</li>,
           td: ({ children }) => <td>{mapChildren(children)}</td>,
+          // wide tables scroll inside the bubble instead of widening it
+          table: ({ children }) => (
+            <div className="prose-chat-table">
+              <table>{children}</table>
+            </div>
+          ),
           strong: ({ children }) => <strong>{mapChildren(children)}</strong>,
           a: ({ href, children }) => (
             <a href={href} target="_blank" rel="noopener noreferrer">

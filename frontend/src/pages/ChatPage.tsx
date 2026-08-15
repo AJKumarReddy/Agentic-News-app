@@ -81,14 +81,14 @@ export default function ChatPage({ onConversationChange }: { onConversationChang
 
   return (
     <div className="flex h-full flex-col bg-brand-soft dark:bg-brand-soft-dark">
-      <div className="flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-3xl px-4 py-8">
+      <div className="flex-1 overflow-y-auto overscroll-contain">
+        <div className="mx-auto max-w-3xl px-3 py-6 sm:px-4 sm:py-8">
           {empty ? (
-            <div className="mt-12 animate-fade-up text-center">
+            <div className="mt-6 animate-fade-up text-center sm:mt-12">
               <div className="mx-auto mb-5 flex h-12 w-12 items-center justify-center rounded-xl border border-ink-200 bg-white text-brand-600 shadow-card dark:border-ink-700 dark:bg-ink-800">
                 <LogoMark className="h-6 w-6" />
               </div>
-              <h1 className="font-serif text-[34px] font-bold leading-tight text-ink-900 dark:text-ink-50">
+              <h1 className="font-serif text-[28px] font-bold leading-tight text-ink-900 dark:text-ink-50 sm:text-[34px]">
                 News AI
               </h1>
               <p className="mx-auto mt-2.5 max-w-md text-[15px] leading-relaxed text-ink-600 dark:text-ink-300">
@@ -96,21 +96,21 @@ export default function ChatPage({ onConversationChange }: { onConversationChang
                 The New York Times, with every claim cited.
               </p>
 
-              <div className="mx-auto mt-9 grid max-w-2xl grid-cols-1 gap-2.5 sm:grid-cols-2">
+              <div className="mx-auto mt-7 grid max-w-2xl grid-cols-1 gap-2.5 sm:mt-9 sm:grid-cols-2">
                 {SUGGESTIONS.map((item) => (
                   <button
                     key={item.label}
                     onClick={() => send(item.label)}
-                    className="group relative overflow-hidden rounded-xl border border-ink-200 dark:border-ink-700 bg-white dark:bg-ink-800 p-3.5 pl-5 text-left shadow-card transition-all hover:-translate-y-0.5 hover:border-brand-300 hover:shadow-lift"
+                    className="group relative min-h-[64px] overflow-hidden rounded-xl border border-ink-200 dark:border-ink-700 bg-white dark:bg-ink-800 p-3.5 pl-5 text-left shadow-card transition-all hover:-translate-y-0.5 hover:border-brand-300 hover:shadow-lift active:scale-[0.99]"
                   >
                     <span
                       className={`absolute inset-y-0 left-0 w-1.5 bg-gradient-to-b ${item.accent}`}
                       aria-hidden="true"
                     />
-                    <span className="block text-sm font-semibold text-ink-800 dark:text-ink-100 group-hover:text-brand-700">
+                    <span className="block text-sm font-semibold text-ink-800 dark:text-ink-100 group-hover:text-brand-700 dark:group-hover:text-brand-300">
                       {item.label}
                     </span>
-                    <span className="mt-0.5 block text-xs text-ink-500 dark:text-ink-400 dark:text-ink-500">{item.hint}</span>
+                    <span className="mt-0.5 block text-xs text-ink-500 dark:text-ink-400">{item.hint}</span>
                   </button>
                 ))}
               </div>
@@ -126,11 +126,15 @@ export default function ChatPage({ onConversationChange }: { onConversationChang
         </div>
       </div>
 
-      <div className="border-t border-ink-200 dark:border-ink-700 bg-white/80 dark:bg-ink-900/80 backdrop-blur">
-        <div className="mx-auto max-w-3xl px-4 py-4">
+      {/* pb clears the iPhone home indicator / Android gesture bar, which sits
+          over the composer once viewport-fit=cover extends the page under it */}
+      <div className="shrink-0 border-t border-ink-200 dark:border-ink-700 bg-white/80 dark:bg-ink-900/80 backdrop-blur">
+        <div className="mx-auto max-w-3xl px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 sm:px-4 sm:pb-4 sm:pt-4">
           <ChatInput onSend={send} busy={busy} onStop={stop} />
-          <p className="mt-2.5 text-center text-[11px] text-ink-400 dark:text-ink-500">
-            Every claim is cited. Verify important facts through the linked articles.
+          <p className="mt-2 text-center text-[11px] leading-tight text-ink-400 dark:text-ink-500 sm:mt-2.5">
+            Every claim is cited.{' '}
+            <span className="hidden sm:inline">Verify important facts through the linked articles.</span>
+            <span className="sm:hidden">Verify important facts.</span>
           </p>
         </div>
       </div>

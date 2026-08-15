@@ -27,7 +27,7 @@ export default function ArticleCard({ article }: { article: Article }) {
       )}
 
       <div className="flex flex-1 flex-col p-4">
-        <div className="mb-2 flex flex-wrap items-center gap-1.5 text-[11px] text-ink-500 dark:text-ink-400 dark:text-ink-500">
+        <div className="mb-2 flex flex-wrap items-center gap-1.5 text-[11px] text-ink-500 dark:text-ink-400">
           <SourceChip sourceId={article.source_id} name={article.source} size="xs" />
           {article.section && <span className="font-medium text-ink-600 dark:text-ink-300">{article.section}</span>}
           {published && <span>· {published}</span>}
@@ -36,24 +36,26 @@ export default function ArticleCard({ article }: { article: Article }) {
         <Link
           to={href}
           state={{ article }}
-          className="font-serif text-[17px] font-bold leading-snug text-ink-900 dark:text-ink-50 transition-colors group-hover:text-brand-700"
+          className="font-serif text-[17px] font-bold leading-snug text-ink-900 dark:text-ink-50 transition-colors group-hover:text-brand-700 dark:group-hover:text-brand-300"
         >
           {article.headline}
         </Link>
 
-        {article.author && <div className="mt-1.5 text-xs text-ink-500 dark:text-ink-400 dark:text-ink-500">{article.author}</div>}
+        {article.author && <div className="mt-1.5 text-xs text-ink-500 dark:text-ink-400">{article.author}</div>}
         {article.trail_text && (
           <p className="mt-2 line-clamp-3 text-[13px] leading-relaxed text-ink-600 dark:text-ink-300">
             {article.trail_text}
           </p>
         )}
 
+        {/* 44px floor on touch: at py-1.5 these landed around 28px tall, well
+            under a comfortable tap target. Back to compact from sm up. */}
         <div className="mt-auto flex gap-2 pt-4">
           <a
             href={article.url}
             target="_blank"
             rel="noopener noreferrer"
-            className="rounded-lg border border-ink-200 dark:border-ink-700 px-3 py-1.5 text-xs font-semibold text-ink-700 dark:text-ink-200 transition-colors hover:border-ink-300 dark:border-ink-600 hover:bg-ink-50 dark:bg-ink-800"
+            className="inline-flex min-h-[44px] items-center rounded-lg border border-ink-200 px-4 text-xs font-semibold text-ink-700 transition-colors hover:border-ink-300 hover:bg-ink-50 dark:border-ink-700 dark:text-ink-200 dark:hover:border-ink-500 dark:hover:bg-ink-700 sm:min-h-0 sm:px-3 sm:py-1.5"
           >
             Read
           </a>
@@ -66,7 +68,7 @@ export default function ArticleCard({ article }: { article: Article }) {
                 },
               })
             }
-            className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-brand-700"
+            className="inline-flex min-h-[44px] items-center rounded-lg bg-brand-600 px-4 text-xs font-semibold text-white transition-colors hover:bg-brand-700 sm:min-h-0 sm:px-3 sm:py-1.5"
           >
             Ask AI
           </button>
