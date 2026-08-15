@@ -7,7 +7,7 @@ import app.sources.nyt as nyt_module
 from app.guardian.models import NormalizedArticle
 from app.services.search_service import merge
 from app.sources.guardian_source import GuardianSource
-from app.sources.nyt import NYTSource
+from app.sources.nyt import NYTSource, _extract_thumbnail
 
 NYT_PAYLOAD = {
     "response": {
@@ -46,6 +46,58 @@ def make_nyt(handler, api_key="test-key") -> NYTSource:
     source = NYTSource(api_key=api_key, client=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
     source.MIN_INTERVAL_SECONDS = 0  # no throttle delay in tests
     return source
+
+
+def test_thumbnail_prefers_article_size_over_the_75px_crop():
+    """Article Search's dict shape offers a 75x75 "thumbnail" alongside the
+    ~600px "default". Cards render ~360px wide, so picking the crop upscales
+    it into mush."""
+    assert _extract_thumbnail(
+        {
+            "default": {"url": "https://static01.nyt.com/a-articleLarge.jpg", "width": 600},
+            "thumbnail": {"url": "https://static01.nyt.com/a-thumbStandard.jpg", "width": 75},
+        }
+    ) == "https://static01.nyt.com/a-articleLarge.jpg"
+
+
+def test_thumbnail_falls_back_to_the_crop_when_it_is_all_there_is():
+    assert _extract_thumbnail(
+        {"thumbnail": {"url": "https://static01.nyt.com/a-thumbStandard.jpg", "width": 75}}
+    ) == "https://static01.nyt.com/a-thumbStandard.jpg"
+
+
+def test_thumbnail_skips_super_jumbo_in_the_list_shape():
+    """Top Stories leads with a 2048px "Super Jumbo"; the smallest image that
+    still covers the card is the right pick."""
+    assert _extract_thumbnail(
+        [
+            {"url": "https://static01.nyt.com/a-superJumbo.jpg", "width": 2048, "type": "image"},
+            {"url": "https://static01.nyt.com/a-threeByTwo.jpg", "width": 600, "type": "image"},
+            {"url": "https://static01.nyt.com/a-thumbLarge.jpg", "width": 150, "type": "image"},
+        ]
+    ) == "https://static01.nyt.com/a-threeByTwo.jpg"
+
+
+def test_thumbnail_takes_the_largest_when_nothing_covers_the_card():
+    assert _extract_thumbnail(
+        [
+            {"url": "https://static01.nyt.com/a-thumbStandard.jpg", "width": 75, "type": "image"},
+            {"url": "https://static01.nyt.com/a-thumbLarge.jpg", "width": 150, "type": "image"},
+        ]
+    ) == "https://static01.nyt.com/a-thumbLarge.jpg"
+
+
+def test_thumbnail_relative_paths_resolve_to_the_image_cdn():
+    """www.nytimes.com/images/... is a 404; the crops live on static01."""
+    assert _extract_thumbnail([{"url": "images/2026/08/10/thumb.jpg"}]).startswith(
+        "https://static01.nyt.com/images/"
+    )
+
+
+def test_thumbnail_handles_no_multimedia():
+    assert _extract_thumbnail(None) == ""
+    assert _extract_thumbnail([]) == ""
+    assert _extract_thumbnail({}) == ""
 
 
 async def test_nyt_disabled_without_key():

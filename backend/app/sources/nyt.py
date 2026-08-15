@@ -86,17 +86,31 @@ def _iso_compact(value: str | None) -> str | None:
 def _absolute(url: str) -> str:
     if not url:
         return ""
-    return url if url.startswith("http") else f"https://www.nytimes.com/{url.lstrip('/')}"
+    # Relative multimedia paths are served from the image CDN, not the
+    # www host — www.nytimes.com/images/... is a 404.
+    return url if url.startswith("http") else f"https://static01.nyt.com/{url.lstrip('/')}"
+
+
+#: Card art is rendered about 360px wide. Anything narrower gets visibly
+#: upscaled, anything much wider is megabytes of bandwidth for nothing.
+_TARGET_WIDTH = 600
 
 
 def _extract_thumbnail(multimedia) -> str:
     """NYT has shipped several multimedia shapes: a list of objects, a list of
     URL strings, and (currently, in Article Search) a dict keyed by size.
-    Handle all of them rather than assuming one."""
+    Handle all of them rather than assuming one.
+
+    Size matters here: the dict shape's "thumbnail" is a 75x75 square crop and
+    the list shape leads with "Super Jumbo" (2048px). Picking either blindly
+    gives a mush of pixels or a needless megabyte, so aim for card size.
+    """
     if not multimedia:
         return ""
     if isinstance(multimedia, dict):
-        for key in ("thumbnail", "default"):
+        # "default" is the ~600x400 article image; "thumbnail" is 75x75, only
+        # worth using when there is nothing else.
+        for key in ("default", "thumbnail"):
             entry = multimedia.get(key)
             if isinstance(entry, dict) and entry.get("url"):
                 return _absolute(entry["url"])
@@ -104,11 +118,23 @@ def _extract_thumbnail(multimedia) -> str:
             return _absolute(multimedia["url"])
         return ""
     if isinstance(multimedia, list):
+        candidates: list[tuple[int, str]] = []
         for media in multimedia:
-            if isinstance(media, dict) and media.get("url"):
-                return _absolute(media["url"])
             if isinstance(media, str) and media:
-                return _absolute(media)
+                candidates.append((0, _absolute(media)))
+            elif isinstance(media, dict) and media.get("url"):
+                if media.get("type") not in (None, "", "image"):
+                    continue
+                width = media.get("width")
+                candidates.append((width if isinstance(width, int) else 0, _absolute(media["url"])))
+        if not candidates:
+            return ""
+        # Smallest image that still covers the card; failing that, the largest
+        # available. Unknown widths (0) sort last so they act as a fallback.
+        big_enough = [c for c in candidates if c[0] >= _TARGET_WIDTH]
+        if big_enough:
+            return min(big_enough, key=lambda c: c[0])[1]
+        return max(candidates, key=lambda c: c[0])[1]
     return ""
 
 

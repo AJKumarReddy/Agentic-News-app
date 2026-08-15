@@ -1,30 +1,24 @@
 import { Link, useNavigate } from 'react-router-dom';
 import type { Article } from '../types';
 import { formatArticleDate } from '../utils/date';
+import ArticleImage from './ArticleImage';
 import SourceChip from './SourceChip';
 
 export default function ArticleCard({ article }: { article: Article }) {
   const navigate = useNavigate();
   const published = formatArticleDate(article.published_at, 'short');
   const href = `/article/${encodeURIComponent(article.article_id)}`;
-  // tint the accent by publisher so a scan of the grid shows the source mix
-  const accentBar =
-    article.source_id === 'nyt' ? 'from-accent-400 to-accent-600' : 'from-brand-400 to-brand-600';
 
   return (
     <article className="group flex flex-col overflow-hidden rounded-xl border border-ink-200 dark:border-ink-700 bg-white dark:bg-ink-800 shadow-card transition-all duration-200 hover:-translate-y-0.5 hover:border-brand-200 hover:shadow-lift">
-      {article.thumbnail ? (
-        <Link to={href} state={{ article }} className="block overflow-hidden bg-ink-100 dark:bg-ink-700">
-          <img
-            src={article.thumbnail}
-            alt=""
-            className="h-44 w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
-            loading="lazy"
-          />
-        </Link>
-      ) : (
-        <Link to={href} state={{ article }} className={`block h-1.5 bg-gradient-to-r ${accentBar}`} />
-      )}
+      <Link to={href} state={{ article }} className="block overflow-hidden bg-ink-100 dark:bg-ink-700">
+        <ArticleImage
+          src={article.thumbnail}
+          sourceId={article.source_id}
+          source={article.source}
+          className="h-44 w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
+        />
+      </Link>
 
       <div className="flex flex-1 flex-col p-4">
         <div className="mb-2 flex flex-wrap items-center gap-1.5 text-[11px] text-ink-500 dark:text-ink-400">
