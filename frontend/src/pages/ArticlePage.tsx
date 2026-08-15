@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import ArticleCard from '../components/ArticleCard';
+import ArticleImage from '../components/ArticleImage';
 import { getArticleIntelligence } from '../services/api';
 import type { Article, ArticleIntelligence } from '../types';
 import { formatArticleDate } from '../utils/date';
@@ -60,8 +61,13 @@ export default function ArticlePage() {
       <div className="h-full overflow-y-auto overscroll-contain bg-brand-soft dark:bg-brand-soft-dark">
         <div className="mx-auto max-w-3xl px-4 py-6 pb-[max(2.5rem,env(safe-area-inset-bottom))] sm:py-10">
         <div className="overflow-hidden rounded-xl border border-ink-200 dark:border-ink-700 bg-white dark:bg-ink-800 shadow-card">
-          {passed?.thumbnail && (
-            <img src={passed.thumbnail} alt="" className="h-44 w-full object-cover sm:h-56" />
+          {passed && (
+            <ArticleImage
+              src={passed.thumbnail}
+              sourceId={passed.source_id}
+              source={passed.source}
+              className="h-44 w-full object-cover sm:h-56"
+            />
           )}
           <div className="p-5 sm:p-7">
             {passed && (
@@ -146,9 +152,13 @@ export default function ArticlePage() {
         <h1 className="mt-2 font-serif text-[26px] font-bold leading-tight text-ink-900 dark:text-ink-50 sm:text-3xl">
           {article.headline}
         </h1>
-        {article.thumbnail && (
-          <img src={article.thumbnail} alt="" className="mt-4 w-full rounded-xl object-cover" />
-        )}
+        <ArticleImage
+          src={article.thumbnail}
+          sourceId={article.source_id}
+          source={article.source}
+          className="mt-4 h-56 w-full rounded-xl object-cover sm:h-72"
+        />
+
 
         <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
           <a
