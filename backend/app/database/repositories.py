@@ -1,10 +1,45 @@
+import re
 from datetime import datetime, timezone
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.models import Article, Chunk, Conversation, Message
 from app.guardian.models import NormalizedArticle
+
+
+def section_variants(section: str) -> list[str]:
+    """The stored `section` spellings that a unified section slug should match.
+
+    Publishers store a display name, not the slug we query them with: the
+    Guardian keeps `sectionName` ("US news") and NYT keeps a title-cased desk
+    ("Us"). Matching the raw slug against either returns nothing, so reduce
+    both sides to a base token and expand it back out.
+    """
+    base = re.sub(r"[^a-z0-9]+", " ", section.lower()).strip()
+    base = re.sub(r"\bnews\b", "", base).strip() or base
+    return list(dict.fromkeys([base, f"{base} news", f"{base}-news", f"{base}news"]))
+
+
+def to_normalized(row: Article) -> NormalizedArticle:
+    """Stored row -> the canonical shape the rest of the app speaks."""
+    return NormalizedArticle(
+        article_id=row.article_id,
+        headline=row.headline,
+        section=row.section,
+        author=row.author,
+        published_at=row.published_at,
+        url=row.url,
+        thumbnail=row.thumbnail,
+        trail_text=row.trail_text,
+        body_text=row.body_text,
+        tags=row.tags or [],
+        source=row.source,
+        source_id=row.source_id,
+        production_office=row.production_office,
+        retrieved_at=row.retrieved_at,
+        content_hash=row.content_hash,
+    )
 
 
 class ArticleRepository:
@@ -39,6 +74,58 @@ class ArticleRepository:
         article.source_id = normalized.source_id
         article.retrieved_at = normalized.retrieved_at
         return article
+
+    async def search_stored(
+        self,
+        *,
+        source_id: str,
+        query: str = "",
+        section: str | None = None,
+        from_date: datetime | None = None,
+        to_date: datetime | None = None,
+        order_by: str = "newest",
+        page: int = 1,
+        page_size: int = 12,
+    ) -> tuple[list[Article], int]:
+        """Previously fetched articles for one publisher.
+
+        This is what the site falls back to when a publisher cannot be reached.
+        It is deliberately a plain relational query — the vector index answers
+        "what is this about", but a section browse only needs "what do we have".
+        """
+        filters = [Article.source_id == source_id]
+        if section:
+            filters.append(func.lower(Article.section).in_(section_variants(section)))
+        if from_date:
+            filters.append(Article.published_at >= from_date)
+        if to_date:
+            filters.append(Article.published_at <= to_date)
+        if query:
+            like = f"%{query}%"
+            filters.append(
+                or_(
+                    Article.headline.ilike(like),
+                    Article.trail_text.ilike(like),
+                )
+            )
+
+        total = await self.session.scalar(
+            select(func.count()).select_from(Article).where(*filters)
+        )
+        # undated rows sort last either way, matching the live merge
+        ordering = (
+            Article.published_at.asc().nullslast()
+            if order_by == "oldest"
+            else Article.published_at.desc().nullslast()
+        )
+        rows = await self.session.execute(
+            select(Article)
+            .where(*filters)
+            .order_by(ordering)
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        )
+        return list(rows.scalars()), int(total or 0)
 
     async def mark_indexed(self, article: Article, content_hash: str, embedding_model: str, chunk_count: int) -> None:
         now = datetime.now(timezone.utc)

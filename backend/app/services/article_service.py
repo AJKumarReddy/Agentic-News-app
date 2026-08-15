@@ -41,28 +41,15 @@ async def get_article(article_id: str) -> NormalizedArticle:
 
 async def _from_index(article_id: str) -> NormalizedArticle | None:
     from app.database.models import Article
+    from app.database.repositories import to_normalized
     from app.database.session import SessionFactory
 
     async with SessionFactory() as session:
         row = await session.get(Article, article_id)
+        # a row with no text is a search-fallback stub, not a readable article
         if row is None or not (row.body_text or row.trail_text):
             return None
-        return NormalizedArticle(
-            article_id=row.article_id,
-            headline=row.headline,
-            section=row.section,
-            author=row.author,
-            published_at=row.published_at,
-            url=row.url,
-            thumbnail=row.thumbnail,
-            trail_text=row.trail_text,
-            body_text=row.body_text,
-            tags=row.tags or [],
-            source=row.source,
-            source_id=row.source_id,
-            production_office=row.production_office,
-            content_hash=row.content_hash,
-        )
+        return to_normalized(row)
 
 
 async def get_related_articles(article: NormalizedArticle, limit: int = 5) -> list[NormalizedArticle]:

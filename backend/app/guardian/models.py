@@ -36,3 +36,7 @@ class GuardianSearchResult(BaseModel):
     pages: int = 1
     page_size: int = 20
     articles: list[NormalizedArticle] = Field(default_factory=list)
+    #: publishers we could not reach on this request and are therefore serving
+    #: from our own store. Empty on a fully live result. The UI shows this so a
+    #: stale section reads as "cached", not as "this publisher has no news".
+    degraded_sources: list[str] = Field(default_factory=list)

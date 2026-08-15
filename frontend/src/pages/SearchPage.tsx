@@ -195,6 +195,18 @@ export default function SearchPage() {
               {result.articles.length} article{result.articles.length === 1 ? '' : 's'} · page{' '}
               {result.page}
             </div>
+            {result.degraded_sources && result.degraded_sources.length > 0 && (
+              <div
+                role="status"
+                className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200"
+              >
+                {result.degraded_sources
+                  .map((id) => sources.find((s) => s.id === id)?.name ?? id)
+                  .join(' and ')}{' '}
+                {result.degraded_sources.length === 1 ? 'is' : 'are'} rate limited right now —
+                showing the most recent articles we already had. Newer stories may be missing.
+              </div>
+            )}
             <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {result.articles.map((article) => (
                 <ArticleCard key={article.article_id} article={article} />

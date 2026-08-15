@@ -4,7 +4,10 @@ Docs: https://open-platform.theguardian.com/documentation/
 """
 
 import asyncio
+import hashlib
+import json
 import logging
+import time
 from typing import Any
 
 import httpx
@@ -13,6 +16,7 @@ from app.core.config import get_settings
 from app.core.logging import Timer, log_event
 from app.guardian.models import GuardianSearchResult, NormalizedArticle
 from app.guardian.normalizer import normalize_article
+from app.services.cache import cache_get, cache_set
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +35,15 @@ class GuardianAPIError(Exception):
 class GuardianClient:
     BASE_URL = "https://content.guardianapis.com"
 
+    #: Developer keys allow ~1 call/second. Pace ourselves rather than
+    #: discovering the limit through 429s, exactly as the NYT client does.
+    MIN_INTERVAL_SECONDS = 1.2
+
+    #: Responses are cached this long. The Content API is the only thing
+    #: standing between us and the 500 calls/day developer cap, and a news
+    #: list does not meaningfully change inside a quarter of an hour.
+    CACHE_TTL_SECONDS = 900
+
     def __init__(self, api_key: str | None = None, client: httpx.AsyncClient | None = None):
         self.api_key = api_key if api_key is not None else get_settings().guardian_api_key
         self._client = client or httpx.AsyncClient(
@@ -38,13 +51,38 @@ class GuardianClient:
             timeout=httpx.Timeout(20.0, connect=10.0),
             headers={"User-Agent": "guardian-ai-news-assistant/1.0"},
         )
+        self._lock = asyncio.Lock()
+        self._last_call = 0.0
 
     async def aclose(self) -> None:
         await self._client.aclose()
 
+    @staticmethod
+    def _cache_key(path: str, params: dict[str, Any]) -> str:
+        # the api key is deliberately excluded: it is a credential, not part
+        # of the identity of the result
+        stable = json.dumps(
+            {k: v for k, v in sorted(params.items()) if k != "api-key"}, default=str
+        )
+        return f"guardian:get:{path}:{hashlib.sha256(stable.encode()).hexdigest()[:32]}"
+
     async def _get(self, path: str, params: dict[str, Any]) -> dict[str, Any]:
         params = {k: v for k, v in params.items() if v not in (None, "", [])}
+        cache_key = self._cache_key(path, params)
+        cached = await cache_get(cache_key)
+        if cached is not None:
+            log_event(logger, "guardian_api_cache_hit", path=path)
+            return cached
+
         params["api-key"] = self.api_key
+
+        # serialise callers so concurrent requests queue instead of colliding
+        async with self._lock:
+            wait = self.MIN_INTERVAL_SECONDS - (time.monotonic() - self._last_call)
+            if wait > 0:
+                await asyncio.sleep(wait)
+            self._last_call = time.monotonic()
+
         last_error: Exception | None = None
         for attempt in range(3):
             try:
@@ -62,11 +100,14 @@ class GuardianClient:
                 if payload.get("status") not in (None, "ok"):
                     raise GuardianAPIError(f"Guardian API status: {payload.get('status')}")
                 log_event(logger, "guardian_api_call", path=path, guardian_api_latency=timer.ms)
+                await cache_set(cache_key, payload, ttl=self.CACHE_TTL_SECONDS)
                 return payload
             except (httpx.TimeoutException, httpx.TransportError) as exc:
                 last_error = exc
                 await asyncio.sleep(0.5 * (attempt + 1))
-        raise GuardianAPIError(f"Guardian API unreachable: {last_error}")
+        # keep the status code: callers distinguish "throttled" from "broken"
+        status = getattr(last_error, "status_code", None)
+        raise GuardianAPIError(f"Guardian API unreachable: {last_error}", status)
 
     async def search(
         self,

@@ -25,6 +25,11 @@ export interface SearchResponse {
   pages: number;
   page_size: number;
   articles: Article[];
+  /**
+   * Publisher ids that could not be reached, whose articles on this page came
+   * from our own store instead of a live fetch. Empty on a fully live result.
+   */
+  degraded_sources?: string[];
 }
 
 export interface Source {
