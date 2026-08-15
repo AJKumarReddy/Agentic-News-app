@@ -379,9 +379,89 @@ async def test_a_failing_source_does_not_break_pagination(monkeypatch):
     ok = StubSource("guardian", SourceResult(articles=[article("a", "guardian")], total=30, pages=3))
     monkeypatch.setattr(search_service, "enabled_sources", lambda: [ok, Failing()])
 
+    # nothing stored for the failed source (autouse `offline_store` fixture)
     result = await search_service.search_news(query="x")
     assert result.pages == 3 and result.total == 30
     assert [a.source_id for a in result.articles] == ["guardian"]
+    assert result.degraded_sources == []
+
+
+async def test_unreachable_source_is_served_from_the_store(monkeypatch):
+    """A rate-limited publisher shows what we already have, not nothing.
+
+    Developer keys are throttled often enough that dropping the publisher from
+    the page would make whole sections look empty.
+    """
+    from app.services import search_service
+    from app.sources.base import NewsSourceError, SourceResult
+
+    class Failing:
+        id = "guardian"
+
+        async def search_page(self, **kwargs):
+            raise NewsSourceError("Guardian API rate limited", 429)
+
+    async def stored(source, **kwargs):
+        assert source.id == "guardian"
+        return SourceResult(articles=[article("cached", "guardian")], total=40, pages=4)
+
+    live = StubSource("nyt", SourceResult(articles=[article("fresh", "nyt")], total=12, pages=1))
+    monkeypatch.setattr(search_service, "enabled_sources", lambda: [Failing(), live])
+    monkeypatch.setattr(search_service, "_from_store", stored)
+
+    result = await search_service.search_news(query="x")
+
+    assert {a.source_id for a in result.articles} == {"guardian", "nyt"}
+    # the store backs the pagination too, so the page count does not collapse
+    assert result.total == 52 and result.pages == 4
+    # ...and the page says so rather than pretending the result is live
+    assert result.degraded_sources == ["guardian"]
+
+
+async def test_live_results_are_written_back_to_the_store(monkeypatch):
+    """Ordinary browsing keeps the fallback warm at no extra publisher quota."""
+    from app.services import search_service
+    from app.sources.base import SourceResult
+
+    saved: list = []
+
+    async def capture(articles):
+        saved.extend(articles)
+
+    live = StubSource("guardian", SourceResult(articles=[article("a", "guardian")], total=1, pages=1))
+    monkeypatch.setattr(search_service, "enabled_sources", lambda: [live])
+    monkeypatch.setattr(search_service, "_remember", capture)
+
+    await search_service.search_news(query="x")
+    assert [a.article_id for a in saved] == ["a"]
+
+
+async def test_failed_source_results_are_not_written_back(monkeypatch):
+    """Only live results are persisted — never what we just read from the store,
+    which would keep refreshing `retrieved_at` on articles nobody re-fetched."""
+    from app.services import search_service
+    from app.sources.base import NewsSourceError, SourceResult
+
+    saved: list = []
+
+    class Failing:
+        id = "guardian"
+
+        async def search_page(self, **kwargs):
+            raise NewsSourceError("down", 429)
+
+    async def stored(source, **kwargs):
+        return SourceResult(articles=[article("cached", "guardian")], total=1, pages=1)
+
+    async def capture(articles):
+        saved.extend(articles)
+
+    monkeypatch.setattr(search_service, "enabled_sources", lambda: [Failing()])
+    monkeypatch.setattr(search_service, "_from_store", stored)
+    monkeypatch.setattr(search_service, "_remember", capture)
+
+    await search_service.search_news(query="x")
+    assert saved == []
 
 
 async def test_top_stories_pages_through_the_feed():
@@ -425,3 +505,32 @@ async def test_top_stories_reports_finite_pages():
     # 10 articles / 4 per page = 3 pages, so Next stops instead of running forever
     assert result.pages == 3
     assert result.total == 10
+
+
+@pytest.mark.parametrize(
+    "slug,stored",
+    [
+        # the Guardian stores sectionName, NYT stores a title-cased desk
+        ("us-news", "US news"),
+        ("us-news", "Us"),
+        ("world", "World news"),
+        ("world", "World"),
+        ("technology", "Technology"),
+        ("business", "Business"),
+        ("politics", "Politics"),
+        ("environment", "Environment"),
+    ],
+)
+def test_section_slug_matches_how_publishers_store_it(slug, stored):
+    """The fallback filters stored rows by the slug the UI browses with, but
+    neither publisher stores the slug — without reconciling them the offline
+    page would come back empty for every section."""
+    from app.database.repositories import section_variants
+
+    assert stored.lower() in section_variants(slug)
+
+
+def test_section_variants_do_not_collapse_distinct_sections():
+    from app.database.repositories import section_variants
+
+    assert not set(section_variants("world")) & set(section_variants("business"))
