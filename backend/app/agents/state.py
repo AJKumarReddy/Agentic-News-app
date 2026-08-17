@@ -31,6 +31,7 @@ class AgentState(TypedDict, total=False):
     evidence: list[dict[str, Any]]
     sources: list[dict[str, Any]]
     notice: str  # UI metadata (e.g. widened window) — never prose in the answer
+    widened: bool  # the requested window found nothing and was loosened
     web_used: bool
 
     # Output

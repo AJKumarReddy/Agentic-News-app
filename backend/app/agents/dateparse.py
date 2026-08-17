@@ -88,13 +88,19 @@ def parse_date_range(text: str, today: date | None = None) -> DateRange | None:
         return span(today, today)
     if re.search(r"\byesterday\b", lowered):
         return span(today - timedelta(days=1), today - timedelta(days=1))
+    # "This week" is a rolling window, not the calendar week. Anchoring it to
+    # Monday made it collapse to a single day every Monday and to two days
+    # every Tuesday — "US politics this week" asked on a Monday returned only
+    # that morning's reporting. Nobody means "since Monday" by it.
     if re.search(r"\bthis week\b", lowered):
-        return span(today - timedelta(days=today.weekday()), today)
+        return span(today - timedelta(days=7), today)
     if re.search(r"\blast week\b", lowered):
         start = today - timedelta(days=today.weekday() + 7)
         return span(start, start + timedelta(days=6))
+    # Same reasoning as "this week": on the 1st or 2nd, a calendar month is a
+    # window of one or two days.
     if re.search(r"\bthis month\b", lowered):
-        return span(today.replace(day=1), today)
+        return span(today - timedelta(days=30), today)
     if re.search(r"\blast month\b", lowered):
         first_this = today.replace(day=1)
         last_prev = first_this - timedelta(days=1)
