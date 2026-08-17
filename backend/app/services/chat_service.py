@@ -34,6 +34,7 @@ _STAGE_LABELS = {
     "news_evidence": "Searching news coverage…",
     "web_evidence": "Searching the web…",
     "synthesize": "Writing the answer…",
+    "decline": "",  # out of scope — no work to report
 }
 
 _NEXT_STAGE = {
@@ -41,6 +42,7 @@ _NEXT_STAGE = {
     "NEWS": "news_evidence",
     "BOTH": "news_evidence",
     "WEB": "web_evidence",
+    "DECLINE": "decline",
 }
 
 
@@ -230,8 +232,9 @@ async def chat_stream(
                         stage = "synthesize"
                     else:
                         stage = None
-                    if stage:
-                        yield _sse("status", {"stage": stage, "detail": _STAGE_LABELS.get(stage, "")})
+                    # a declined turn does no work, so it reports no progress
+                    if stage and _STAGE_LABELS.get(stage):
+                        yield _sse("status", {"stage": stage, "detail": _STAGE_LABELS[stage]})
 
         answer = final_state.get("answer", "")
         if answer and not streamed_any:

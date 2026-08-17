@@ -21,20 +21,28 @@ const ROUTE_LABELS: Record<string, { label: string; className: string; title: st
     className: 'bg-accent-50 text-accent-700 dark:bg-accent-500/20 dark:text-accent-200',
     title: 'Answered from newsroom reporting plus web sources',
   },
+  DECLINE: {
+    label: 'Out of scope',
+    className: 'bg-ink-100 text-ink-600 dark:bg-ink-700 dark:text-ink-300',
+    title: 'Not a news question — nothing was searched',
+  },
 };
 
 /** Shows where the routing agent sent this question, and what it understood
  *  the question to be after resolving it against the conversation. */
 export default function RouteBadge({ routing }: { routing: RouteDecision }) {
   const route = ROUTE_LABELS[routing.route] ?? ROUTE_LABELS.NEWS;
-  const rewritten = routing.standalone_question;
+  // A declined turn was never interpreted as a question or given an intent —
+  // showing either would suggest the assistant took the request seriously.
+  const declined = routing.route === 'DECLINE';
+  const rewritten = declined ? '' : routing.standalone_question;
 
   return (
     <div className="mb-2 flex flex-wrap items-center gap-1.5 text-[11px]">
       <span className={`rounded px-1.5 py-0.5 font-semibold ${route.className}`} title={route.title}>
         {route.label}
       </span>
-      {routing.intent && (
+      {!declined && routing.intent && (
         <span className="rounded bg-ink-100 dark:bg-ink-700 px-1.5 py-0.5 font-medium text-ink-600 dark:text-ink-300">
           {routing.intent.toLowerCase().replace('_', ' ')}
         </span>

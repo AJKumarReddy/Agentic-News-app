@@ -11,8 +11,9 @@ class AgentState(TypedDict, total=False):
 
     # Understanding step
     standalone_question: str  # resolved, self-contained question
-    mode: str  # ARTICLE | NEWS | WEB | BOTH
+    mode: str  # ARTICLE | NEWS | WEB | BOTH | DECLINE (out of scope)
     intent: str  # QA | LATEST | SUMMARY | COMPARISON | TIMELINE | ...
+    reason: str  # why this mode was chosen — logged, never shown
     entities: list[str]
     topics: list[str]
     from_date: str | None

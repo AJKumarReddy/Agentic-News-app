@@ -100,3 +100,53 @@ async def test_bad_model_output_falls_back_to_heuristics():
     result = await understand("Latest AI news", llm=FakeLLM("not json"))
     assert result.mode == "NEWS"
     assert result.news_query
+
+
+# ── scope guardrail ───────────────────────────────────────────────
+
+async def test_coding_request_is_declined():
+    result = await understand("write a python code for reversing linked list", llm=None)
+    assert result.mode == "DECLINE"
+
+
+async def test_decline_overrides_the_model_choosing_web():
+    # the model's opinion cannot route an out-of-scope task into a search
+    llm = FakeLLM({"mode": "WEB", "standalone_question": "how to reverse a linked list", "web_query": "reverse linked list python"})
+    result = await understand("write a python code for reversing linked list", llm=llm)
+    assert result.mode == "DECLINE"
+
+
+async def test_decline_overrides_an_explicit_web_request():
+    result = await understand("google how to write a sorting function in python", llm=None)
+    assert result.mode == "DECLINE"
+
+
+async def test_declined_turn_carries_no_search_queries():
+    result = await understand("write me a function that sorts an array", llm=None)
+    assert result.news_query == ""
+    assert result.web_query == ""
+
+
+async def test_declined_turn_ignores_an_active_article():
+    result = await understand(
+        "now write that as python code",
+        history=ARTICLE_HISTORY,
+        active_article="UK manufacturers…",
+        llm=None,
+    )
+    assert result.mode == "DECLINE"
+
+
+async def test_news_about_software_is_not_declined():
+    result = await understand("What has been reported about the Python security bug?", llm=None)
+    assert result.mode == "NEWS"
+
+
+async def test_decline_survives_only_in_the_resolution():
+    # the raw message is innocuous; the resolved question is not
+    llm = FakeLLM(
+        {"mode": "WEB", "standalone_question": "write a python script to scrape headlines",
+         "web_query": "python scrape headlines"}
+    )
+    result = await understand("do that", llm=llm)
+    assert result.mode == "DECLINE"

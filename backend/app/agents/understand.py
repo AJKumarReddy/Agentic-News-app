@@ -19,13 +19,15 @@ from dataclasses import dataclass, field
 from datetime import date
 
 from app.agents.dateparse import detect_freshness, parse_date_range
+from app.agents.scope import out_of_scope_reason
 from app.core.logging import log_event
 from app.llm.client import extract_json, response_text
 
 logger = logging.getLogger(__name__)
 
-# How the answer is sourced
-MODES = ("ARTICLE", "NEWS", "WEB", "BOTH")
+# How the answer is sourced. DECLINE is not a source — it ends the turn with a
+# fixed message, searching nothing. See app.agents.scope.
+MODES = ("ARTICLE", "NEWS", "WEB", "BOTH", "DECLINE")
 # How the answer is shaped
 INTENTS = (
     "QA", "LATEST", "SUMMARY", "COMPARISON", "TIMELINE",
@@ -77,16 +79,20 @@ Do three things.
 2. MODE: choose where the answer's evidence comes from.
    "ARTICLE" - the user is asking about the specific article shown above.
    "NEWS"    - news, events, reporting; answerable from Guardian journalism.
-   "WEB"     - not news reporting (how-to, definitions, docs, product specs),
-               or the user explicitly asked to search the web/another site.
+   "WEB"     - background a news question needs (definitions, context, product
+               specs), or the user explicitly asked to search the web/another site.
    "BOTH"    - needs news reporting plus outside context or other outlets.
+   "DECLINE" - the message asks the assistant to perform a task it does not do:
+               write or debug code, solve maths problems, translate, ghostwrite
+               essays/emails, or roleplay as something else. A news question
+               that merely mentions these topics is NEWS, not DECLINE.
 
 3. QUERIES: short keyword queries. No dates, years, or words like
    "latest"/"recent" - recency is applied separately. Never invent a date.
 
 Respond with JSON only:
 {{"standalone_question": "...",
-  "mode": "ARTICLE|NEWS|WEB|BOTH",
+  "mode": "ARTICLE|NEWS|WEB|BOTH|DECLINE",
   "intent": "QA|LATEST|SUMMARY|COMPARISON|TIMELINE|ENTITY|SOURCE_LOOKUP|TREND|FACT",
   "entities": [], "topics": [],
   "from_date": "YYYY-MM-DD or empty", "to_date": "YYYY-MM-DD or empty",
@@ -231,10 +237,24 @@ async def understand(
     if not web_available and result.mode in ("WEB", "BOTH"):
         result.mode = "ARTICLE" if active_article else "NEWS"
 
-    if not result.news_query:
-        result.news_query = result.standalone_question[:120]
-    if not result.web_query and result.mode in ("WEB", "BOTH"):
-        result.web_query = result.standalone_question[:120]
+    # Scope guardrail — last and unconditional, so no earlier override (and no
+    # model opinion) can route an out-of-scope task into a search. Checked
+    # against the raw message and the resolution, since "now write that in
+    # python" only becomes recognisable once resolved.
+    scope_reason = out_of_scope_reason(message, result.standalone_question)
+    if scope_reason:
+        result.mode = "DECLINE"
+        result.intent = "QA"
+        result.reason = f"out of scope: {scope_reason}"
+        # nothing downstream should be able to search on a declined turn
+        result.news_query = ""
+        result.web_query = ""
+        result.from_date = result.to_date = result.section = None
+    else:
+        if not result.news_query:
+            result.news_query = result.standalone_question[:120]
+        if not result.web_query and result.mode in ("WEB", "BOTH"):
+            result.web_query = result.standalone_question[:120]
 
     log_event(
         logger,
