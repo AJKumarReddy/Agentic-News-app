@@ -86,14 +86,26 @@ def build_synthesis_prompt(
         f"HOW TO SHAPE THE ANSWER:\n{INTENT_GUIDANCE.get(intent, INTENT_GUIDANCE['QA'])}",
         f"CITATION POLICY:\n{CITATION_POLICY.get(mode, CITATION_POLICY['NEWS'])}",
     ]
-    if date_window:
+    if date_window and widened:
+        # The stated window found nothing and was widened. The reader asked for
+        # a period and is not getting it, so that has to be said plainly —
+        # quietly answering from outside the window is what made the date
+        # filter look broken in the first place.
+        parts.append(
+            f"PERIOD ASKED ABOUT: {date_window}. Nothing indexed was published then, so every "
+            "source below falls OUTSIDE that period. Open by saying, in one short sentence, "
+            "that you found no reporting from it — then give what you did find, with each "
+            "item's date. Never present these as being from the period asked about."
+        )
+    elif date_window:
         # The evidence is already filtered to the window; this stops the model
         # reaching for remembered events outside it and dating them vaguely.
         parts.append(
             f"PERIOD ASKED ABOUT: {date_window}. Every source below falls inside it. "
-            "Give each development its date, and do not add events you are not shown."
+            "Give each development its date unless the reader asked you not to, and do "
+            "not add events you are not shown."
         )
-    if widened:
+    elif widened:
         parts.append(
             "NOTE: the evidence may fall outside the exact period asked about. Include each "
             "item's date so the reader can judge. Do not write a disclaimer about the search window."
@@ -107,9 +119,9 @@ def build_synthesis_prompt(
     elif date_window:
         # Answering from memory here would defeat the date filter entirely.
         parts.append(
-            f"EVIDENCE: none. No indexed reporting falls within {date_window}. Say exactly that "
-            "in one sentence, naming the period, and suggest widening it. Do not answer from "
-            "memory and do not offer events from outside the period."
+            f"EVIDENCE: none. No indexed reporting was published {date_window}. Say exactly "
+            "that in one sentence, naming the period, and suggest a wider one. Do not answer "
+            "from memory and do not offer events from outside the period."
         )
     else:
         parts.append(

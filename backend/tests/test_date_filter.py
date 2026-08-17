@@ -134,15 +134,65 @@ def test_filter_bounds_are_utc_aware():
 
 # ── a stated range is never widened ───────────────────────────────
 
-async def test_stated_range_is_not_widened_when_empty(retrieval):
+async def test_stated_range_is_tried_first_and_alone(retrieval):
+    """Leniency is a fallback, not a shortcut: the stated window is always the
+    first retrieval, unfiltered by anything wider."""
+    await run(
+        "what was reported between 2026-03-01 and 2026-03-31",
+        understanding=Understanding(**MARCH),
+    )
+    first = retrieval.filters[0]
+    assert first.from_date.date() == date(2026, 3, 1)
+    assert first.to_date.date() == date(2026, 3, 31)
+
+
+async def test_empty_stated_range_widens_and_says_so(retrieval, monkeypatch):
+    async def empty_then_hit(session, query, filters=None, **kwargs):
+        retrieval.filters.append(filters)
+        return [] if len(retrieval.filters) == 1 else [chunk(datetime.now(timezone.utc))]
+
+    monkeypatch.setattr(graph_module.tools, "retrieve_rag", empty_then_hit)
     final = await run(
         "what was reported between 2026-03-01 and 2026-03-31",
         understanding=Understanding(**MARCH),
     )
-    # exactly one retrieval: no relaxation ladder ran
-    assert len(retrieval.filters) == 1
+    assert len(retrieval.filters) > 1  # the ladder ran
+    assert final["sources"]  # and produced an answer rather than nothing
+    assert final["notice"] == (
+        "Nothing between 2026-03-01 and 2026-03-31 — showing last 14 days"
+    )
+
+
+async def test_a_widened_stated_range_is_flagged_to_the_model(retrieval, monkeypatch):
+    """The reader must be told the sources are from outside the period."""
+    captured: dict = {}
+
+    async def empty_then_hit(session, query, filters=None, **kwargs):
+        retrieval.filters.append(filters)
+        return [] if len(retrieval.filters) == 1 else [chunk(datetime.now(timezone.utc))]
+
+    monkeypatch.setattr(graph_module.tools, "retrieve_rag", empty_then_hit)
+    monkeypatch.setattr(
+        graph_module,
+        "build_synthesis_prompt",
+        lambda **kwargs: captured.update(kwargs) or "prompt",
+    )
+    final = await run(
+        "what was reported between 2026-03-01 and 2026-03-31",
+        understanding=Understanding(**MARCH),
+    )
+    assert final["widened"] is True
+    assert captured["widened"] is True
+    assert captured["date_window"] == "between 2026-03-01 and 2026-03-31"
+
+
+async def test_nothing_anywhere_still_reports_the_period(retrieval):
+    final = await run(
+        "what was reported between 2026-03-01 and 2026-03-31",
+        understanding=Understanding(**MARCH),
+    )
     assert final["sources"] == []
-    assert final["notice"] == "No newsroom coverage in 2026-03-01 to 2026-03-31"
+    assert final["notice"] == "No newsroom coverage between 2026-03-01 and 2026-03-31"
 
 
 async def test_inferred_window_still_widens(retrieval):
@@ -176,14 +226,15 @@ async def test_widening_reports_itself(retrieval, monkeypatch):
 
 # ── the window is described to the model, not hidden from it ──────
 
-def test_window_label_reads_naturally():
+def test_window_label_carries_its_own_preposition():
+    # it is dropped straight into a sentence: "No newsroom coverage <label>"
     assert _window_label({"from_date": "2026-03-01", "to_date": "2026-03-31"}) == (
-        "2026-03-01 to 2026-03-31"
+        "between 2026-03-01 and 2026-03-31"
     )
-    assert _window_label({"from_date": "2026-03-01", "to_date": "2026-03-01"}) == "2026-03-01"
+    assert _window_label({"from_date": "2026-03-01", "to_date": "2026-03-01"}) == "on 2026-03-01"
     assert _window_label({"from_date": "2026-03-01"}) == "since 2026-03-01"
     assert _window_label({"to_date": "2026-03-31"}) == "up to 2026-03-31"
-    assert _window_label({}) == "that period"
+    assert _window_label({}) == "in that period"
 
 
 # ── model-supplied dates are validated ────────────────────────────

@@ -210,15 +210,20 @@ def _history_messages(history: list[dict]) -> list[Any]:
 
 
 def _window_label(state: AgentState) -> str:
-    """The requested period, phrased for a UI notice."""
+    """The requested period as a phrase that reads on its own.
+
+    It carries its own preposition because it is dropped straight into a
+    sentence — "No newsroom coverage since 2026-03-01" — and a caller cannot
+    know which one fits a range it has not inspected.
+    """
     start, end = state.get("from_date"), state.get("to_date")
     if start and end:
-        return start if start == end else f"{start} to {end}"
+        return f"on {start}" if start == end else f"between {start} and {end}"
     if start:
         return f"since {start}"
     if end:
         return f"up to {end}"
-    return "that period"
+    return "in that period"
 
 
 def _web_days(state: AgentState) -> int | None:
@@ -394,49 +399,49 @@ def build_agent_graph(session: AsyncSession, understanding_llm=None, synthesis_l
                 )
             }
 
-        # Widening only ever applies to a window *we* inferred. A range the user
-        # stated is a constraint: if nothing was published in it, the honest
-        # answer is that nothing was published in it. Silently answering from
-        # outside the window is what made date filtering look broken.
+        # An empty window widens rather than returning nothing — including a
+        # window the user stated. The date filter still leads: the stated range
+        # is always tried first and on its own. What changes when it misses is
+        # that we say where the results actually came from instead of returning
+        # an empty answer, and the synthesis prompt is told the sources fall
+        # outside the period so the reader is told too.
         notice = ""
+        widened = False
         if not any(groups.values()) and (filters.from_date or filters.sections):
-            if state.get("date_explicit"):
-                # Scoped to newsroom reporting: the web leg may still find
-                # sources inside the same window, and this notice sits beside
-                # their citations.
-                notice = f"No newsroom coverage in {_window_label(state)}"
-            else:
-                # Loosen one constraint at a time, widest last, so the answer
-                # stays as close to what was asked as the index allows.
-                ladder: list[tuple[str, RetrievalFilters]] = []
-                if filters.from_date:
-                    ladder.append(
-                        (
-                            f"Last {RELAX_WINDOW_DAYS} days",
-                            replace(
-                                filters,
-                                from_date=filters.from_date - timedelta(days=RELAX_WINDOW_DAYS),
-                            ),
-                        )
-                    )
+            # Loosen one constraint at a time, widest last, so the answer stays
+            # as close to what was asked as the index allows.
+            ladder: list[tuple[str, RetrievalFilters]] = []
+            if filters.from_date:
                 ladder.append(
-                    ("All indexed reporting", replace(filters, from_date=None, to_date=None))
+                    (
+                        f"last {RELAX_WINDOW_DAYS} days",
+                        replace(
+                            filters,
+                            from_date=filters.from_date - timedelta(days=RELAX_WINDOW_DAYS),
+                        ),
+                    )
                 )
-                if filters.sections:
-                    ladder.append(
-                        (
-                            "All sections",
-                            replace(filters, from_date=None, to_date=None, sections=[]),
-                        )
+            ladder.append(
+                ("all indexed reporting", replace(filters, from_date=None, to_date=None))
+            )
+            if filters.sections:
+                ladder.append(
+                    ("all sections", replace(filters, from_date=None, to_date=None, sections=[]))
+                )
+            for label, wider in ladder:
+                fallback = await tools.retrieve_rag(session, question, filters=wider, freshness=True)
+                if fallback:
+                    groups = {"default": fallback}
+                    widened = True
+                    notice = (
+                        f"Nothing {_window_label(state)} — showing {label}"
+                        if state.get("date_explicit")
+                        else f"Results from {label}"
                     )
-                for label, wider in ladder:
-                    fallback = await tools.retrieve_rag(
-                        session, question, filters=wider, freshness=True
-                    )
-                    if fallback:
-                        groups = {"default": fallback}
-                        notice = f"Results from {label}"
-                        break
+                    break
+            else:
+                if state.get("date_explicit"):
+                    notice = f"No newsroom coverage {_window_label(state)}"
 
         evidence, sources = _chunks_to_evidence(groups)
         log_event(
@@ -446,12 +451,13 @@ def build_agent_graph(session: AsyncSession, understanding_llm=None, synthesis_l
             sources=len(sources),
             date_range=f"{state.get('from_date') or ''}..{state.get('to_date') or ''}",
             date_explicit=bool(state.get("date_explicit")),
-            widened=bool(notice) and not state.get("date_explicit"),
+            widened=widened,
         )
         return {
             "evidence": evidence,
             "sources": sources,
             "notice": notice,
+            "widened": widened,
             **_advance(state, "news_evidence"),
         }
 
@@ -467,15 +473,11 @@ def build_agent_graph(session: AsyncSession, understanding_llm=None, synthesis_l
         )
         # Tavily's window only bounds the start, and it bounds it loosely. The
         # requested range is enforced here so a web citation can't fall outside
-        # the period the publisher results were held to.
-        if state.get("from_date") or state.get("to_date"):
-            results = within_range(
-                results,
-                state.get("from_date"),
-                state.get("to_date"),
-                # an undated page can't be shown to fall inside a stated range
-                keep_undated=not state.get("date_explicit"),
-            )
+        # the period the publisher results were held to — unless that period
+        # already came up empty and was widened, in which case holding the web
+        # leg to it would be the only strict thing left in the turn.
+        if (state.get("from_date") or state.get("to_date")) and not state.get("widened"):
+            results = within_range(results, state.get("from_date"), state.get("to_date"))
         evidence, sources = _web_to_evidence(
             results, list(state.get("evidence", [])), list(state.get("sources", []))
         )
@@ -494,7 +496,7 @@ def build_agent_graph(session: AsyncSession, understanding_llm=None, synthesis_l
             mode=state.get("mode", "NEWS"),
             intent=state.get("intent", "QA"),
             output_format=state.get("output_format", ""),
-            widened=bool(state.get("notice")) and not state.get("date_explicit"),
+            widened=bool(state.get("widened")),
             has_web=bool(state.get("web_used")),
             # only a stated period is a constraint worth naming to the model
             date_window=_window_label(state) if state.get("date_explicit") else "",
