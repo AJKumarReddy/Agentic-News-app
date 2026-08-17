@@ -214,6 +214,66 @@ def test_successful_article_turn_keeps_the_pin():
     assert updated["active_article_id"] == ARTICLE_ID
 
 
+def test_the_headline_is_persisted_for_the_next_turn():
+    """Nothing wrote this before, so routing asked the model whether a question
+    was about "world/2026/aug/01/inquiry" instead of about a headline."""
+    updated = _updated_state(
+        {"active_article_id": ARTICLE_ID},
+        {"mode": "ARTICLE", "article_used": True, "active_article_headline": "The inquiry reports"},
+    )
+    assert updated["active_article_headline"] == "The inquiry reports"
+
+
+async def test_the_article_node_reports_its_headline(monkeypatch):
+    async def found(article_id, session=None):
+        return article()
+
+    monkeypatch.setattr(graph_module.tools, "get_source_article", found)
+    final = await run("what does it say about the findings?", dict(PINNED))
+    assert final["active_article_headline"] == "The inquiry reports"
+
+
+async def test_clearing_the_article_empties_both_fields():
+    """The reader can release the pin without sending a message — only they
+    know whether the conversation has moved on."""
+    from app.api.chat import clear_conversation_article
+
+    class Repo:
+        def __init__(self, session):
+            self.conversation = SimpleNamespace(state=dict(PINNED))
+
+        async def get(self, conversation_id, user_id=""):
+            return self.conversation
+
+    class Session:
+        def __init__(self):
+            self.committed = False
+
+        async def commit(self):
+            self.committed = True
+
+    import app.api.chat as chat_api
+
+    repo_holder: dict = {}
+
+    def make_repo(session):
+        repo_holder["repo"] = Repo(session)
+        return repo_holder["repo"]
+
+    original = chat_api.ConversationRepository
+    chat_api.ConversationRepository = make_repo
+    try:
+        session = Session()
+        await clear_conversation_article("c1", session=session, client_id="client-1")
+    finally:
+        chat_api.ConversationRepository = original
+
+    state = repo_holder["repo"].conversation.state
+    assert state["active_article_id"] == ""
+    assert state["active_article_headline"] == ""
+    assert session.committed
+
+
 def test_other_modes_leave_the_pin_alone():
     """A web or news detour mid-conversation must not drop the article the
     reader is still looking at."""

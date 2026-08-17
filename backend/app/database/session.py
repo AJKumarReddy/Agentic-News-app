@@ -39,6 +39,17 @@ async def init_db() -> None:
                 "USING hnsw (embedding vector_cosine_ops)"
             )
         )
+        # Sections are compared in canonical form — publishers store a display
+        # name ("US news", "U.S.") and we filter with a slug. The plain index on
+        # `section` cannot serve that expression, so it needs its own. The
+        # expression must match app.sources.sections/_section_column exactly.
+        for table in ("chunks", "articles"):
+            await conn.execute(
+                text(
+                    f"CREATE INDEX IF NOT EXISTS ix_{table}_section_canonical ON {table} "
+                    "(lower(regexp_replace(section, '[^a-zA-Z0-9]', '', 'g')))"
+                )
+            )
         # migrations for tables created before these columns existed
         await conn.execute(
             text("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS user_id VARCHAR(64) DEFAULT ''")

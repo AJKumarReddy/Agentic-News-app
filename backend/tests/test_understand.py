@@ -56,6 +56,28 @@ async def test_explicit_web_request_reaches_the_web():
     assert result.mode in ("WEB", "BOTH")
 
 
+async def test_a_news_question_about_a_site_is_not_a_request_to_search_it():
+    """"About YouTube" is a subject; "on YouTube" is an instruction. Matching a
+    bare site name skipped newsroom retrieval for the site's own news story."""
+    for message in (
+        "what is the latest news about YouTube ad policy",
+        "Reddit protest coverage this week",
+        "how is TikTok being regulated",
+    ):
+        result = await understand(message, llm=None)
+        assert result.mode == "NEWS", message
+
+
+async def test_an_instruction_to_search_a_site_still_reaches_the_web():
+    for message in (
+        "search youtube for related news",
+        "search for related news on youtube",
+        "check reddit for reaction",
+    ):
+        result = await understand(message, llm=None)
+        assert result.mode in ("WEB", "BOTH"), message
+
+
 async def test_non_news_question_uses_web():
     result = await understand("How do I configure nginx for SSE?", llm=None)
     assert result.mode == "WEB"

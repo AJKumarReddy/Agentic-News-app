@@ -55,6 +55,14 @@ export class SSEParser {
             standalone_question: String(data.standalone_question ?? ''),
           },
         };
+      case 'article':
+        return {
+          type: 'article',
+          article: {
+            article_id: String(data.article_id ?? ''),
+            headline: String(data.headline ?? ''),
+          },
+        };
       case 'done':
         return { type: 'done' };
       case 'error':

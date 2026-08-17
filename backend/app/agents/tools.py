@@ -193,6 +193,13 @@ async def retrieve_rag(
     return ensure_source_diversity(selected, candidates) if diversify else selected
 
 
+#: How long an identical fetch-and-index is considered already done. Every
+#: NEWS turn runs this — up to three publisher searches plus embedding calls —
+#: and a conversation circling one subject repeats the same one. Short enough
+#: that a breaking story still arrives within a turn or two.
+FETCH_CACHE_TTL = 180
+
+
 async def fetch_and_index(
     session: AsyncSession,
     queries: list[str],
@@ -203,7 +210,20 @@ async def fetch_and_index(
     order_by: str = "newest",
 ) -> dict[str, Any]:
     """Fetch by search queries and/or explicit IDs concurrently, then index
-    everything found. This is the freshness path: Guardian API first, RAG second."""
+    everything found. This is the freshness path: Guardian API first, RAG second.
+
+    Skipped entirely when the identical fetch ran moments ago: the articles are
+    already indexed, so repeating it spends publisher quota and embedding calls
+    to arrive at the state we are already in.
+    """
+    cache_key = (
+        f"fetch:{'|'.join(queries[:3])}:{from_date}:{to_date}:{section}:{order_by}"
+        f":{','.join(article_ids or [])}"
+    )
+    cached = await cache_get(cache_key)
+    if cached is not None:
+        return {**cached, "cached": True}
+
     searches = [
         search_publishers(q, from_date=from_date, to_date=to_date, section=section, order_by=order_by)
         for q in queries[:3]
@@ -219,6 +239,7 @@ async def fetch_and_index(
     stats = asdict(await ingest_articles(session, list(seen.values())))
     stats["found"] = len(seen)
     stats["article_ids"] = list(seen.keys())
+    await cache_set(cache_key, stats, ttl=FETCH_CACHE_TTL)
     return stats
 
 

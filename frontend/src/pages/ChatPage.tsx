@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { useLocation, useSearchParams } from 'react-router-dom';
+import ArticleChip from '../components/ArticleChip';
 import ChatInput from '../components/ChatInput';
 import MessageBubble from '../components/MessageBubble';
 import { getConversation } from '../services/api';
@@ -19,8 +20,19 @@ const SUGGESTIONS = [
 ];
 
 export default function ChatPage({ onConversationChange }: { onConversationChange?: () => void }) {
-  const { messages, setMessages, conversationId, setConversationId, busy, send, stop, reset } =
-    useChat();
+  const {
+    messages,
+    setMessages,
+    conversationId,
+    setConversationId,
+    activeArticle,
+    setActiveArticle,
+    clearArticle,
+    busy,
+    send,
+    stop,
+    reset,
+  } = useChat();
   const [searchParams] = useSearchParams();
   const location = useLocation();
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -48,10 +60,17 @@ export default function ChatPage({ onConversationChange }: { onConversationChang
         setMessages(
           detail.messages.map((m) => ({ role: m.role, content: m.content, sources: m.sources || [] })),
         );
+        // a reopened chat is still anchored to whatever it was anchored to
+        const pinned = detail.state?.active_article_id;
+        setActiveArticle(
+          pinned
+            ? { article_id: pinned, headline: detail.state?.active_article_headline || '' }
+            : null,
+        );
       })
       .catch(() => undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [requestedConversation, conversationId, setConversationId, setMessages]);
+  }, [requestedConversation, conversationId, setConversationId, setMessages, setActiveArticle]);
 
   // Guarded against StrictMode double-invocation, which previously sent
   // "Ask AI" questions twice and interleaved two streams into one bubble.
@@ -130,6 +149,7 @@ export default function ChatPage({ onConversationChange }: { onConversationChang
           over the composer once viewport-fit=cover extends the page under it */}
       <div className="shrink-0 border-t border-ink-200 dark:border-ink-700 bg-white/80 dark:bg-ink-900/80 backdrop-blur">
         <div className="mx-auto max-w-3xl px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 sm:px-4 sm:pb-4 sm:pt-4">
+          {activeArticle && <ArticleChip article={activeArticle} onClear={clearArticle} />}
           <ChatInput onSend={send} busy={busy} onStop={stop} />
           <p className="mt-2 text-center text-[11px] leading-tight text-ink-400 dark:text-ink-500 sm:mt-2.5">
             Every claim is cited.{' '}

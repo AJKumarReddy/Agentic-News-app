@@ -19,8 +19,11 @@ class GuardianSource(NewsSource):
 
     def owns(self, article_id: str) -> bool:
         # Guardian ids are path-like ("technology/2026/aug/07/story") and never
-        # carry a scheme, which is what distinguishes them from NYT ids
-        return not article_id.startswith("nyt://")
+        # carry a scheme, which is what distinguishes them from every other
+        # publisher's. Testing only for the "nyt://" prefix made this a
+        # catch-all that would claim any source added later, so the id would
+        # route here and then fail to resolve.
+        return "://" not in article_id
 
     async def search(
         self,

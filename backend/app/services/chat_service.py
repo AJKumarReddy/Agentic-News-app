@@ -9,6 +9,8 @@ SSE event types sent to the frontend:
   sources  {sources: [...]}        — numbered citations
   notice   {detail}                — retrieval metadata (e.g. widened window),
                                      shown as a UI badge, never as answer prose
+  article  {article_id, headline}  — the article this conversation is anchored
+                                     to after this turn, or empty once released
   done     {}
   error    {detail}
 """
@@ -68,7 +70,10 @@ def _updated_state(previous: dict, final: dict) -> dict:
         },
         "active_article_id": "" if stale_article else previous.get("active_article_id", ""),
         "active_article_headline": (
-            "" if stale_article else previous.get("active_article_headline", "")
+            ""
+            if stale_article
+            else final.get("active_article_headline")
+            or previous.get("active_article_headline", "")
         ),
         "previous_intent": final.get("intent", ""),
         "last_sources": final.get("sources", [])[:10],
@@ -186,6 +191,11 @@ async def chat_once(
         "intent": final.get("intent", ""),
         "notice": final.get("notice", ""),
         "steps": final.get("steps", []),
+        # parity with the stream's `article` event
+        "active_article": {
+            "article_id": conversation.state.get("active_article_id", ""),
+            "headline": conversation.state.get("active_article_headline", ""),
+        },
     }
 
 
@@ -262,6 +272,16 @@ async def chat_stream(
         yield _sse("sources", {"sources": final_state.get("sources", [])})
 
         conversation.state = _updated_state(conv_state, final_state)
+        # Tell the client what the conversation is anchored to now. Sent after
+        # the state is settled so a released pin reports as released, and sent
+        # every turn so the chip can never drift from what routing will use.
+        yield _sse(
+            "article",
+            {
+                "article_id": conversation.state.get("active_article_id", ""),
+                "headline": conversation.state.get("active_article_headline", ""),
+            },
+        )
         await repo.add_message(conversation, "assistant", answer, final_state.get("sources", []))
         await session.commit()
         yield _sse("done", {})

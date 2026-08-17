@@ -63,12 +63,18 @@ export async function listConversations(): Promise<ConversationSummary[]> {
 export interface ConversationDetail {
   id: string;
   title: string;
+  state?: { active_article_id?: string; active_article_headline?: string };
   messages: { role: 'user' | 'assistant'; content: string; sources: Source[] }[];
 }
 
 export async function getConversation(id: string): Promise<ConversationDetail> {
   const { data } = await http.get<ConversationDetail>(`/conversations/${id}`);
   return data;
+}
+
+/** Unpin the article a conversation is anchored to. */
+export async function clearConversationArticle(id: string): Promise<void> {
+  await http.delete(`/conversations/${id}/article`);
 }
 
 export async function deleteConversation(id: string): Promise<void> {

@@ -1,4 +1,3 @@
-import re
 from datetime import datetime, timezone
 
 from sqlalchemy import delete, func, or_, select
@@ -6,19 +5,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.models import Article, Chunk, Conversation, Message
 from app.guardian.models import NormalizedArticle
+from app.sources.sections import related_sections, section_match_values
 
 
-def section_variants(section: str) -> list[str]:
-    """The stored `section` spellings that a unified section slug should match.
-
-    Publishers store a display name, not the slug we query them with: the
-    Guardian keeps `sectionName` ("US news") and NYT keeps a title-cased desk
-    ("Us"). Matching the raw slug against either returns nothing, so reduce
-    both sides to a base token and expand it back out.
-    """
-    base = re.sub(r"[^a-z0-9]+", " ", section.lower()).strip()
-    base = re.sub(r"\bnews\b", "", base).strip() or base
-    return list(dict.fromkeys([base, f"{base} news", f"{base}-news", f"{base}news"]))
+def _section_column():
+    """`Article.section` canonicalised the same way the slug is."""
+    return func.lower(func.regexp_replace(Article.section, r"[^a-zA-Z0-9]", "", "g"))
 
 
 def to_normalized(row: Article) -> NormalizedArticle:
@@ -95,7 +87,12 @@ class ArticleRepository:
         """
         filters = [Article.source_id == source_id]
         if section:
-            filters.append(func.lower(Article.section).in_(section_variants(section)))
+            # widened to the section's subject neighbours, like RAG retrieval
+            wanted: list[str] = []
+            for related in related_sections(section):
+                wanted.extend(section_match_values(related))
+            if wanted:
+                filters.append(_section_column().in_(list(dict.fromkeys(wanted))))
         if from_date:
             filters.append(Article.published_at >= from_date)
         if to_date:

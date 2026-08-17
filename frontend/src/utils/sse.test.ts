@@ -26,6 +26,22 @@ describe('SSEParser', () => {
     expect(events[1].type).toBe('done');
   });
 
+  it('parses the anchored-article event', () => {
+    const parser = new SSEParser();
+    const events = parser.feed(
+      'event: article\ndata: {"article_id": "world/2026/a", "headline": "The inquiry reports"}\n\n',
+    );
+    expect(events).toEqual([
+      { type: 'article', article: { article_id: 'world/2026/a', headline: 'The inquiry reports' } },
+    ]);
+  });
+
+  it('reports a released article as an empty id', () => {
+    const parser = new SSEParser();
+    const events = parser.feed('event: article\ndata: {"article_id": "", "headline": ""}\n\n');
+    expect(events[0]).toEqual({ type: 'article', article: { article_id: '', headline: '' } });
+  });
+
   it('parses sources events with payload', () => {
     const parser = new SSEParser();
     const sources = [

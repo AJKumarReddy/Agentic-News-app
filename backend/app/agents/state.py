@@ -28,6 +28,7 @@ class AgentState(TypedDict, total=False):
 
     # Evidence
     article_used: bool  # the pinned article resolved; False releases the pin
+    active_article_headline: str  # persisted so the next turn can name it
     evidence: list[dict[str, Any]]
     sources: list[dict[str, Any]]
     notice: str  # UI metadata (e.g. widened window) — never prose in the answer

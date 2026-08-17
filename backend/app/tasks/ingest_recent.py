@@ -25,8 +25,35 @@ from app.rag.ingestion import ingest_articles
 logger = logging.getLogger(__name__)
 
 # us-news first: the app favours the Guardian's US desk, so keep that
-# section warm in the index rather than relying on ranking alone
-DEFAULT_SECTIONS = ["us-news", "technology", "business", "world", "politics", "environment"]
+# section warm in the index rather than relying on ranking alone.
+#
+# Breadth matters more than depth per section. A question like "US politics
+# this week" is answered from us-news, politics, world *and* commentisfree —
+# leaving a desk out of this list means its reporting is not in the index at
+# all, and no amount of retrieval tuning recovers it.
+DEFAULT_SECTIONS = [
+    "us-news",
+    "politics",
+    "world",
+    "technology",
+    "business",
+    "environment",
+    "commentisfree",
+    "science",
+    "society",
+    "money",
+    "media",
+]
+
+#: Articles pulled per section per publisher per tick. A section can easily
+#: publish more than a dozen pieces in the window between two ticks, and
+#: anything past the cap is simply never indexed.
+INGEST_PAGE_SIZE = 50
+
+#: How far back a scheduled run looks. One day left gaps whenever the app was
+#: stopped overnight — and those gaps are permanent, since a later run only
+#: ever looks at its own window.
+INGEST_DAYS_BACK = 3
 
 
 def rotating_sections(tick: int, count: int = 1) -> list[str]:
@@ -44,14 +71,21 @@ def rotating_sections(tick: int, count: int = 1) -> list[str]:
     return [DEFAULT_SECTIONS[(start + i) % n] for i in range(count)]
 
 
-async def ingest_recent(sections: list[str] | None = None, days_back: int = 1) -> None:
+async def ingest_recent(
+    sections: list[str] | None = None, days_back: int = INGEST_DAYS_BACK
+) -> None:
     from_date = (date.today() - timedelta(days=days_back)).isoformat()
 
     sections = sections or DEFAULT_SECTIONS
     # fetch all sections concurrently; ingestion shares one session so it stays sequential
     results = await asyncio.gather(
         *(
-            search_news(section=section, from_date=from_date, order_by="newest", page_size=20)
+            search_news(
+                section=section,
+                from_date=from_date,
+                order_by="newest",
+                page_size=INGEST_PAGE_SIZE,
+            )
             for section in sections
         )
     )

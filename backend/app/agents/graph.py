@@ -36,6 +36,7 @@ from app.core.logging import log_event
 from app.llm.client import get_chat_model, response_text
 from app.llm.prompts import SYSTEM_PROMPT, build_synthesis_prompt
 from app.rag.vector_store import RetrievalFilters, ScoredChunk
+from app.sources.sections import related_sections
 from app.websearch.client import requested_domains, within_range
 
 logger = logging.getLogger(__name__)
@@ -248,10 +249,15 @@ def _web_days(state: AgentState) -> int | None:
 
 
 def _build_filters(state: AgentState) -> RetrievalFilters:
+    # A section is a filing decision, not a subject: US political reporting
+    # lands in us-news, politics, world or commentisfree depending on the desk
+    # and the day. Pinning retrieval to the single section a model guessed
+    # threw away most of the coverage, so the slug is widened to its subject
+    # neighbours. See app.sources.sections.
     filters = RetrievalFilters.from_iso(
         state.get("from_date"),
         state.get("to_date"),
-        sections=[state["section"]] if state.get("section") else None,
+        sections=related_sections(state["section"]) if state.get("section") else None,
     )
     conv = state.get("conversation_state", {})
     if state.get("intent") == "SOURCE_LOOKUP" and conv.get("last_sources"):
@@ -355,6 +361,11 @@ def build_agent_graph(session: AsyncSession, understanding_llm=None, synthesis_l
             "evidence": evidence,
             "sources": [source],
             "article_used": True,
+            # Persisted so the next turn's routing prompt can name the article.
+            # Nothing wrote this before, so `understand` fell back to the raw
+            # id — asking the model whether a question is about
+            # "world/2026/aug/01/inquiry" rather than about a headline.
+            "active_article_headline": article.headline,
             **_advance(state, "article_evidence"),
         }
 

@@ -568,15 +568,27 @@ async def test_top_stories_reports_finite_pages():
     ],
 )
 def test_section_slug_matches_how_publishers_store_it(slug, stored):
-    """The fallback filters stored rows by the slug the UI browses with, but
-    neither publisher stores the slug — without reconciling them the offline
-    page would come back empty for every section."""
-    from app.database.repositories import section_variants
+    """Rows are filtered by the slug the UI browses with, but neither
+    publisher stores the slug — without reconciling them the page would come
+    back empty for every section. Both sides reduce to letters and digits, so
+    "U.S." and "US news" both meet "us-news"."""
+    from app.sources.sections import canonical_section, section_match_values
 
-    assert stored.lower() in section_variants(slug)
+    assert canonical_section(stored) in section_match_values(slug)
+
+
+def test_guardian_does_not_claim_other_publishers_ids():
+    """`owns` used to test only for the "nyt://" prefix, making Guardian a
+    catch-all that would swallow every source added later."""
+    from app.sources.guardian_source import GuardianSource
+
+    guardian = GuardianSource()
+    assert guardian.owns("technology/2026/aug/07/story")
+    for foreign in ("nyt://article/1", "apitube://12345", "ap://x", "bbc://news/1"):
+        assert not guardian.owns(foreign), foreign
 
 
 def test_section_variants_do_not_collapse_distinct_sections():
-    from app.database.repositories import section_variants
+    from app.sources.sections import section_match_values
 
-    assert not set(section_variants("world")) & set(section_variants("business"))
+    assert not set(section_match_values("world")) & set(section_match_values("business"))

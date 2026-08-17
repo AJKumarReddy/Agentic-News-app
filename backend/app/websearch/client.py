@@ -8,6 +8,7 @@ reporting; nothing here is ever presented as Guardian journalism.
 """
 
 import logging
+import re
 from datetime import date, datetime, timezone
 from urllib.parse import urlparse
 
@@ -115,11 +116,25 @@ def within_range(
     return kept
 
 
+# "search youtube", "on reddit" — an instruction to look somewhere, not a
+# mention of it. The site name has to follow a word that asks for it.
+_SITE_REQUEST = re.compile(
+    r"\b(?:search|check|browse|try|watch|look\s+(?:on|at|in|up)|find\s+(?:it\s+)?on|on|via|from)"
+    r"\s+(?:the\s+)?([a-z][a-z0-9-]*)\b",
+    re.IGNORECASE,
+)
+
+
 def requested_domains(message: str) -> list[str]:
-    """Domains the user named explicitly. If someone asks for YouTube, they
-    should get YouTube — the quality filter must not silently substitute."""
-    lowered = message.lower()
-    return [d for d in LOW_SIGNAL_DOMAINS if d.split(".")[0] in lowered]
+    """Domains the user asked us to look on. If someone asks for YouTube, they
+    should get YouTube — the quality filter must not silently substitute.
+
+    Matched in an instruction context only. A plain substring test let any
+    question *about* one of these sites — "the latest on YouTube's ad policy" —
+    un-block it as a citable source for its own news story.
+    """
+    asked = {match.group(1).lower() for match in _SITE_REQUEST.finditer(message)}
+    return [domain for domain in LOW_SIGNAL_DOMAINS if domain.split(".")[0] in asked]
 
 
 def _passes_quality_gate(
