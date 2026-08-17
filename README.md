@@ -148,7 +148,9 @@ Full list in [.env.example](.env.example). The ones that matter:
 | `RERANKER` | `llm` (default) · `cohere` · `none` |
 | `FRONTEND_URL` · `EXTRA_CORS_ORIGINS` | CORS allowlist — never `*` in production |
 | `API_KEY` · `VITE_API_KEY` | optional `X-API-Key` gate for private deployments |
-| `RATE_LIMIT_PER_MINUTE` · `CHAT_RATE_LIMIT_PER_MINUTE` | per-IP budgets (30 / 10) |
+| `RATE_LIMIT_PER_MINUTE` · `CHAT_RATE_LIMIT_PER_MINUTE` | per-IP budgets (30 / 10). The stricter one covers every path that costs an LLM call, an embedding or a publisher request |
+| `TRUSTED_PROXY_HOPS` | proxies in front of the app (default `1` = one ALB/nginx). The client address is read that many entries in from the right of `X-Forwarded-For`; everything further left is written by the caller. Set `0` when the app is reached directly |
+| `ADMIN_API_KEY` | unlocks the operator endpoints (`/api/rag/*`, `/api/intent`) via `X-Admin-Key`. Unset, they are **closed in production** and open in development. Never put this in the SPA bundle |
 
 Locally these come from `.env`. **In production nothing is read from a file** — the ECS task
 definition lists plain values inline and pulls every secret (`GUARDIAN_API_KEY`, `NYT_API_KEY`,
