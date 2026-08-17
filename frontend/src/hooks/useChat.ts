@@ -1,12 +1,15 @@
 import { useCallback, useRef, useState } from 'react';
-import { streamChat } from '../services/api';
-import type { ChatMessage } from '../types';
+import { clearConversationArticle, streamChat } from '../services/api';
+import type { ActiveArticle, ChatMessage } from '../types';
 
 const TOKEN_FLUSH_MS = 50;
 
 export function useChat() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [conversationId, setConversationId] = useState<string | null>(null);
+  // The article this conversation answers about, reported by the server after
+  // every turn — including when it releases the pin itself.
+  const [activeArticle, setActiveArticle] = useState<ActiveArticle | null>(null);
   const [busy, setBusy] = useState(false);
   // synchronous re-entry guard: state updates are async, so two rapid send()
   // calls would both see busy=false and stream into the same bubble
@@ -77,6 +80,9 @@ export function useChat() {
               case 'route':
                 updateAssistant((m) => ({ ...m, routing: event.decision }));
                 break;
+              case 'article':
+                setActiveArticle(event.article.article_id ? event.article : null);
+                break;
               case 'error':
                 flushTokens();
                 updateAssistant((m) => ({
@@ -106,13 +112,39 @@ export function useChat() {
 
   const stop = useCallback(() => abortRef.current?.abort(), []);
 
+  const clearArticle = useCallback(async () => {
+    // clear locally first: the chip should respond to the click even if the
+    // request is slow, and the next turn re-reports the truth either way
+    setActiveArticle(null);
+    if (conversationId) {
+      try {
+        await clearConversationArticle(conversationId);
+      } catch {
+        // a failed unpin is not worth interrupting the conversation over
+      }
+    }
+  }, [conversationId]);
+
   const reset = useCallback(() => {
     abortRef.current?.abort();
     setMessages([]);
     setConversationId(null);
+    setActiveArticle(null);
     busyRef.current = false;
     setBusy(false);
   }, []);
 
-  return { messages, setMessages, conversationId, setConversationId, busy, send, stop, reset };
+  return {
+    messages,
+    setMessages,
+    conversationId,
+    setConversationId,
+    activeArticle,
+    setActiveArticle,
+    clearArticle,
+    busy,
+    send,
+    stop,
+    reset,
+  };
 }

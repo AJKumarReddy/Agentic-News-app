@@ -16,11 +16,23 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import defer
 
 from app.database.models import Chunk
+from app.sources.sections import section_match_values
 
 
 def _utc(value: datetime) -> datetime:
     """Anchor a bound to UTC so it compares predictably against timestamptz."""
     return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+
+
+def _section_column():
+    """`Chunk.section` reduced to letters and digits, for comparison.
+
+    Publishers store a display name ("US news", "U.S."), we ask with a slug
+    ("us-news"). A plain `lower(section) IN ('us-news')` matched neither, so
+    every section-filtered retrieval came back empty — indistinguishable from
+    a subject nobody had covered.
+    """
+    return func.lower(func.regexp_replace(Chunk.section, r"[^a-zA-Z0-9]", "", "g"))
 
 
 @dataclass
@@ -75,7 +87,11 @@ def _apply_filters(stmt, filters: RetrievalFilters | None):
     if filters.to_date:
         stmt = stmt.where(Chunk.published_at <= filters.to_date)
     if filters.sections:
-        stmt = stmt.where(func.lower(Chunk.section).in_([s.lower() for s in filters.sections]))
+        wanted: list[str] = []
+        for section in filters.sections:
+            wanted.extend(section_match_values(section))
+        if wanted:
+            stmt = stmt.where(_section_column().in_(list(dict.fromkeys(wanted))))
     if filters.article_ids:
         stmt = stmt.where(Chunk.article_id.in_(filters.article_ids))
     if filters.source_ids:

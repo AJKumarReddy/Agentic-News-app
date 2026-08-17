@@ -87,7 +87,11 @@ async def test_explicitly_requested_domain_survives_the_filter():
     }
     client = make_client(lambda r: httpx.Response(200, json=payload))
     assert "youtube.com" in requested_domains("search youtube for related news")
+    assert "youtube.com" in requested_domains("find related coverage on youtube")
     assert requested_domains("latest AI news") == []
+    # a question *about* a site must not un-block it as a source for itself
+    assert requested_domains("what is the latest news about YouTube ad policy") == []
+    assert requested_domains("how is TikTok being regulated") == []
 
     blocked = await client.search("q")
     assert [r.source for r in blocked] == ["reuters.com"]

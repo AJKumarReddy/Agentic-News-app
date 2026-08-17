@@ -90,6 +90,13 @@ export interface ArticleIntelligence {
   related: Article[];
 }
 
+/** The article a conversation is currently anchored to. Questions that refer
+ *  back to it ("what does it say about X") are answered from it directly. */
+export interface ActiveArticle {
+  article_id: string;
+  headline: string;
+}
+
 export type ChatStreamEvent =
   | { type: 'state'; conversation_id: string }
   | { type: 'status'; stage: string; detail: string }
@@ -97,5 +104,6 @@ export type ChatStreamEvent =
   | { type: 'sources'; sources: Source[] }
   | { type: 'notice'; detail: string }
   | { type: 'route'; decision: RouteDecision }
+  | { type: 'article'; article: ActiveArticle }
   | { type: 'done' }
   | { type: 'error'; detail: string };

@@ -1,11 +1,17 @@
 """RAG evaluation harness.
 
-Runs the 20-question suite against a running backend and reports:
+Runs the question suite against a running backend and reports:
   - citation presence where expected
   - honest refusal on unsupported questions (no hallucinated sources)
+  - scope: out-of-scope task requests are declined, and never searched
+  - routing accuracy (which evidence path the question took)
+  - date windows: cited sources actually fall inside the period asked about
   - intent routing accuracy
   - follow-up context retention (same conversation id)
   - latency
+
+Unit tests prove the plumbing holds; this catches the model drifting while it
+does. Every check here corresponds to a defect that reached a user.
 
 Usage:
     python evaluation/run_eval.py --base-url http://localhost:8000
@@ -17,6 +23,7 @@ import asyncio
 import json
 import re
 import time
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import httpx
@@ -24,8 +31,14 @@ import httpx
 INSUFFICIENT_MARKERS = [
     "insufficient", "could not find", "couldn't find", "no guardian reporting",
     "not able to locate", "no relevant guardian", "unable to find", "does not appear",
-    "no evidence", "wasn't able to find",
+    "no evidence", "wasn't able to find", "no newsroom coverage", "no reporting",
 ]
+
+#: Wording that shows the assistant declined rather than attempted the task.
+DECLINE_MARKERS = ["news research assistant", "outside what i do", "outside what it does"]
+
+#: Answering a coding request at all leaves traces no news answer would have.
+ATTEMPTED_TASK_MARKERS = ["def ", "class ", "return ", "```", "import ", "console.log"]
 
 
 async def ask(client: httpx.AsyncClient, question: str, conversation_id: str | None = None) -> dict:
@@ -47,6 +60,45 @@ def has_inline_citations(answer: str) -> bool:
     return bool(re.search(r"\[\d+\]", answer))
 
 
+def check_decline(answer: str, sources: list, mode: str) -> list[str]:
+    """An out-of-scope request must be refused without spending a search."""
+    issues = []
+    lowered = answer.lower()
+    if mode and mode != "DECLINE":
+        issues.append(f"routed {mode}, expected DECLINE")
+    if sources:
+        issues.append(f"cited {len(sources)} sources for an out-of-scope request")
+    if not any(marker in lowered for marker in DECLINE_MARKERS):
+        issues.append("did not decline in the expected terms")
+    for marker in ATTEMPTED_TASK_MARKERS:
+        if marker in lowered:
+            issues.append(f"attempted the task (contains {marker!r})")
+            break
+    return issues
+
+
+def check_window(sources: list, days: int) -> list[str]:
+    """Cited sources have to fall inside the period the question asked for.
+
+    Sources from outside it are the failure users actually saw: an answer that
+    looks period-scoped but is not. A widened window is allowed only when the
+    answer says so, which `looks_insufficient` covers separately.
+    """
+    cutoff = date.today() - timedelta(days=days + 1)  # a day's slack for timezones
+    stale = []
+    for source in sources:
+        raw = (source.get("published_at") or "")[:10]
+        if not raw:
+            continue
+        try:
+            published = datetime.fromisoformat(raw).date()
+        except ValueError:
+            continue
+        if published < cutoff:
+            stale.append(f"{raw} ({source.get('source', '?')})")
+    return [f"sources outside the {days}-day window: {', '.join(stale[:3])}"] if stale else []
+
+
 async def run(base_url: str) -> int:
     questions = json.loads((Path(__file__).parent / "questions.json").read_text(encoding="utf-8"))
     passed = failed = 0
@@ -60,6 +112,16 @@ async def run(base_url: str) -> int:
                 result = await ask(client, item["question"])
                 answer, sources = result.get("answer", ""), result.get("sources", [])
                 intent = result.get("intent", "")
+                mode = result.get("mode", "")
+
+                if item.get("expect_decline"):
+                    issues.extend(check_decline(answer, sources, mode))
+
+                if item.get("expected_route") and mode not in item["expected_route"]:
+                    issues.append(f"routed {mode}, expected one of {item['expected_route']}")
+
+                if item.get("expect_window_days") and not looks_insufficient(answer):
+                    issues.extend(check_window(sources, item["expect_window_days"]))
 
                 if item.get("expect_citations"):
                     if not sources:
@@ -81,8 +143,13 @@ async def run(base_url: str) -> int:
 
                 if item.get("follow_up"):
                     follow = await ask(client, item["follow_up"], result.get("conversation_id"))
-                    if not follow.get("answer"):
+                    follow_answer = follow.get("answer", "")
+                    if not follow_answer:
                         issues.append("follow-up returned empty answer")
+                    # the thread is replayed into synthesis, so a question
+                    # about the previous turn must not come back empty-handed
+                    elif looks_insufficient(follow_answer):
+                        issues.append("follow-up lost the conversation context")
 
             except Exception as exc:  # noqa: BLE001
                 issues.append(f"request failed: {exc}")

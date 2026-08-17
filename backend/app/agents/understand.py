@@ -104,15 +104,27 @@ Respond with JSON only:
   "output_format": "timeline|table|bullets or empty",
   "reason": "one short clause"}}"""
 
+# An instruction to look elsewhere — never the mere mention of a site. A bare
+# "youtube|reddit" used to match here, so "the latest news about YouTube's ad
+# policy" was read as "go and search YouTube": it skipped newsroom retrieval
+# entirely and un-blocked youtube.com as a citable source. "on youtube" is an
+# instruction; "about youtube" is a subject.
 _EXPLICIT_WEB = re.compile(
-    r"\b(search (?:the )?(?:web|internet|online|youtube|google)|google it|look (?:it )?up|"
-    r"other (?:sources|outlets|publications|sites)|besides|outside the guardian|"
-    r"elsewhere|corroborat|fact.?check|youtube|reddit)\b",
+    r"\bsearch (?:the )?(?:web|internet|online)\b"
+    r"|\b(?:search|check|browse|try|look (?:on|at|in))\s+(?:on\s+)?"
+    r"(?:youtube|reddit|google|twitter|tiktok)\b"
+    r"|\b(?:on|via|from)\s+(?:youtube|reddit|tiktok)\b"
+    r"|\bgoogle it\b|\blook (?:it )?up\b"
+    r"|\bother (?:sources|outlets|publications|sites)\b"
+    r"|\bbesides\b|\boutside the guardian\b|\belsewhere\b|\bcorroborat|\bfact.?check",
     re.IGNORECASE,
 )
+# A reference lookup: background a news question needs, where an older page is
+# a legitimate source. Task requests ("write me a script", "calculate…") used
+# to be listed here too, but app.agents.scope declines those before this runs,
+# so those branches were dead and drifting out of sync with the guardrail.
 _NON_NEWS = re.compile(
-    r"^\s*(how (?:do|to|can) |what is the (?:definition|syntax|formula)|define |"
-    r"explain how |write (?:me )?(?:a|some) (?:code|script)|convert |calculate )",
+    r"^\s*(how (?:do|to|can) |what is the (?:definition|syntax|formula)|define |explain how )",
     re.IGNORECASE,
 )
 _FOLLOW_UP = re.compile(

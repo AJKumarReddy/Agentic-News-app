@@ -110,6 +110,30 @@ async def delete_conversation(
     await session.commit()
 
 
+@router.delete("/conversations/{conversation_id}/article", status_code=204)
+async def clear_conversation_article(
+    conversation_id: str,
+    session: AsyncSession = Depends(get_session),
+    client_id: str = Depends(client_id_header),
+):
+    """Unpin the article a conversation is anchored to.
+
+    A chat opened from an article keeps answering about it until the pin is
+    released, which is right while the reader is still on that piece and wrong
+    once they have moved on. Only the reader knows which, so give them the
+    control rather than guessing.
+    """
+    repo = ConversationRepository(session)
+    conversation = await repo.get(conversation_id, user_id=client_id)
+    if conversation is None:
+        raise HTTPException(404, "Conversation not found")
+    state = dict(conversation.state or {})
+    state["active_article_id"] = ""
+    state["active_article_headline"] = ""
+    conversation.state = state
+    await session.commit()
+
+
 @router.get("/conversations/{conversation_id}")
 async def get_conversation(
     conversation_id: str,

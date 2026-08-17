@@ -119,7 +119,8 @@ async def test_comparison_keeps_the_section(retrieval):
             intent="COMPARISON", entities=["Meta", "Apple"], section="technology", **MARCH
         ),
     )
-    assert retrieval.filters[0].sections == ["technology"]
+    # widened to the section's subject neighbours, but still led by it
+    assert retrieval.filters[0].sections[0] == "technology"
     assert retrieval.filters[0].to_date.date() == date(2026, 3, 31)
 
 
