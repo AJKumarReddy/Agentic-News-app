@@ -17,11 +17,21 @@ import hmac
 import time
 from collections import defaultdict, deque
 
-from fastapi import Request
+from fastapi import HTTPException, Request
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse, Response
 
+from app.core.config import get_settings
+
 _SECURE_HEADERS = {
+    # TLS terminates at the ALB, so this response travels to it over plain
+    # HTTP — but the ALB forwards the header to the browser over HTTPS, which
+    # is where it takes effect. Without it, the very first request of a visit
+    # can still go out in cleartext before the :80 → :443 redirect answers.
+    # Browsers ignore the header on a plain-HTTP page, so local dev is
+    # unaffected. No `preload` — that is a one-way commitment to the HSTS
+    # preload list, including every subdomain, and should be a deliberate act.
+    "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
     "X-Content-Type-Options": "nosniff",
     "X-Frame-Options": "DENY",
     "Referrer-Policy": "strict-origin-when-cross-origin",
@@ -35,12 +45,44 @@ _SECURE_HEADERS = {
 
 EXEMPT_PATHS = {"/api/health"}
 
+#: Paths whose every request costs an LLM call, a publisher request or an
+#: embedding. They share the stricter budget: previously only "/api/chat"
+#: matched exactly, so article intelligence — an LLM call per request, straight
+#: from the article page — sat on the general limit alongside static reads.
+_EXPENSIVE_PATHS = {"/api/chat", "/api/intent"}
+_EXPENSIVE_SUFFIXES = ("/intelligence",)
+
+
+def is_expensive(path: str) -> bool:
+    return path in _EXPENSIVE_PATHS or path.startswith("/api/rag/") or path.endswith(
+        _EXPENSIVE_SUFFIXES
+    )
+
 
 def client_ip(request: Request) -> str:
-    """Client address, honoring the X-Forwarded-For set by nginx/ALB."""
-    forwarded = request.headers.get("x-forwarded-for", "")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
+    """Client address, read from the trusted end of X-Forwarded-For.
+
+    A proxy *appends* the address it received the connection from, so the
+    rightmost entries are written by our own infrastructure and the leftmost
+    by the caller. Reading the leftmost — as this did — meant anyone could
+    send `X-Forwarded-For: <anything>` and land in a fresh rate-limit bucket
+    on every request, which made both limiters decorative.
+
+    `trusted_proxy_hops` says how many entries on the right we put there
+    ourselves; the last of those is the real client. Set it to 0 when the
+    process is reachable directly, and the header is ignored entirely.
+    """
+    hops = get_settings().trusted_proxy_hops
+    if hops > 0:
+        forwarded = [
+            part.strip()
+            for part in request.headers.get("x-forwarded-for", "").split(",")
+            if part.strip()
+        ]
+        if forwarded:
+            # count in from the right; never fall off the left end, or a short
+            # header would hand the caller control of the bucket again
+            return forwarded[max(0, len(forwarded) - hops)]
     return request.client.host if request.client else "unknown"
 
 
@@ -127,8 +169,9 @@ class RateLimiter:
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
-    """Per-IP sliding window. /api/chat gets its own (stricter) budget since
-    each request fans out into Guardian calls, embeddings, and LLM calls."""
+    """Per-IP sliding window. Paths that fan out into publisher calls,
+    embeddings or LLM calls get their own, stricter budget — see
+    `is_expensive`."""
 
     def __init__(self, app, limit_per_minute: int = 30, chat_limit_per_minute: int = 10):
         super().__init__(app)
@@ -139,7 +182,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         if request.url.path in EXEMPT_PATHS or request.method == "OPTIONS":
             return await call_next(request)
         # separate limiter instances already namespace the buckets
-        limiter = self.chat_limiter if request.url.path == "/api/chat" else self.limiter
+        limiter = self.chat_limiter if is_expensive(request.url.path) else self.limiter
         if not limiter.allow(client_ip(request)):
             return JSONResponse(
                 status_code=429,
@@ -162,6 +205,34 @@ class TimeoutMiddleware(BaseHTTPMiddleware):
             return await asyncio.wait_for(call_next(request), timeout=self.timeout_seconds)
         except asyncio.TimeoutError:
             return JSONResponse(status_code=504, content={"detail": "Request timed out"})
+
+
+async def require_admin(request: Request) -> None:
+    """Gate operator-only endpoints.
+
+    `/api/rag/*` and `/api/intent` spend publisher quota and OpenAI credit on
+    every call, and nothing in the UI uses them — they are debugging tools that
+    happened to sit on the same public path prefix as the product. With one ALB
+    routing `/api/*` to the backend, that made them reachable by anyone who
+    knew the URL.
+
+    The global `API_KEY` gate cannot serve here: the SPA would have to carry
+    that key in its bundle, where it is readable by everyone the gate is meant
+    to exclude. So these use a separate key that only an operator holds.
+
+    Unset, they are closed in production and open in development, which keeps
+    the tooling usable locally without leaving a hole in a deployment that
+    never configured it. 404 rather than 403 so the response says nothing
+    about what is there.
+    """
+    settings = get_settings()
+    if not settings.admin_api_key:
+        if settings.is_production:
+            raise HTTPException(status_code=404, detail="Not Found")
+        return
+    provided = request.headers.get("x-admin-key", "")
+    if not hmac.compare_digest(provided.encode(), settings.admin_api_key.encode()):
+        raise HTTPException(status_code=404, detail="Not Found")
 
 
 def sanitize_user_text(text: str, max_length: int = 4000) -> str:

@@ -76,6 +76,14 @@
         {
           "name": "INGEST_ENABLED",
           "value": "false"
+        },
+        {
+          "name": "TRUSTED_PROXY_HOPS",
+          "value": "1"
+        },
+        {
+          "name": "CHAT_RATE_LIMIT_PER_MINUTE",
+          "value": "10"
         }
       ],
       "secrets": [

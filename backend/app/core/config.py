@@ -62,6 +62,17 @@ class Settings(BaseSettings):
     rate_limit_per_minute: int = 30
     chat_rate_limit_per_minute: int = 10
     api_key: str = ""  # optional X-API-Key gate; empty = disabled
+    # Proxies between the client and this process, counted from the right of
+    # X-Forwarded-For. 1 = a single ALB/nginx (the default deployment), 2 =
+    # CDN in front of it, 0 = reached directly, trust no forwarding header.
+    # Anything left of these hops is written by the caller and cannot be
+    # trusted — reading the wrong end makes the rate limiter bypassable.
+    trusted_proxy_hops: int = 1
+    # Gate for operator-only endpoints (/api/rag/*, /api/intent). These spend
+    # publisher quota and OpenAI credit, and no part of the UI calls them.
+    # Empty in production closes them entirely; empty in development leaves
+    # them open so the tooling still works locally.
+    admin_api_key: str = ""
     allowed_hosts: str = ""  # comma-separated Host allowlist; empty = any
     max_body_bytes: int = 65536
     request_timeout_seconds: int = 120

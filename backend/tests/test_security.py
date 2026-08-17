@@ -95,6 +95,38 @@ async def test_security_headers_present():
     assert "Content-Security-Policy" in response.headers
 
 
+async def test_hsts_is_sent():
+    """TLS terminates at the ALB, so the app never sees HTTPS — but the header
+    it sets is what reaches the browser over it. Without this, the first
+    request of a visit can go out in cleartext before the :80 redirect."""
+    app = make_app(headers=True)
+    async with client_for(app) as client:
+        response = await client.get("/api/data")
+    hsts = response.headers["Strict-Transport-Security"]
+    assert "max-age=31536000" in hsts
+    assert "includeSubDomains" in hsts
+    # preload is a one-way commitment covering every subdomain
+    assert "preload" not in hsts
+
+
+async def test_cors_headers_survive_a_short_circuited_response():
+    """CORS is outermost, so a response produced by an inner middleware still
+    carries it. Registered innermost, a 413/429/401 reached the browser with no
+    CORS header at all and surfaced as an opaque CORS failure instead of its
+    real status."""
+    from app.main import create_app
+
+    app = create_app()
+    transport = httpx.ASGITransport(app=app)
+    origin = {"Origin": "http://localhost:3000"}
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        oversized = await client.post(
+            "/api/chat", headers={**origin, "Content-Length": "999999"}, content=b"x" * 8
+        )
+    assert oversized.status_code == 413
+    assert oversized.headers["access-control-allow-origin"] == "http://localhost:3000"
+
+
 async def test_timeout_returns_504():
     import asyncio
 

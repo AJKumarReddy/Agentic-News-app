@@ -279,6 +279,29 @@ aws elbv2 create-listener --load-balancer-arn <ALB_ARN> --protocol HTTP --port 8
 cache and each publisher, so an unhealthy dependency fails the target check and blocks a bad
 rollout.
 
+**`/api/*` is public — two settings decide what that costs.** The listener rule sends every
+`/api/*` path to the backend, so anything mounted there is reachable by anyone who knows the
+URL.
+
+* **`TRUSTED_PROXY_HOPS=1`** tells the rate limiter that exactly one proxy (this ALB) sits in
+  front. The ALB *appends* the address it saw, so the rightmost `X-Forwarded-For` entry is the
+  real client and everything to its left was written by the caller. Reading the leftmost — the
+  previous behaviour — let anyone send a different `X-Forwarded-For` per request and get a fresh
+  rate-limit bucket every time, which made both limiters decorative. Raise this to `2` if you
+  put CloudFront in front of the ALB.
+* **`ADMIN_API_KEY`** controls `/api/rag/*` and `/api/intent`. Those spend embeddings, publisher
+  quota and LLM calls, and nothing in the UI calls them. With `ENVIRONMENT=production` and no
+  key set they return `404` — which is the safe default and needs no parameter created. Only
+  add the secret if you want the tooling reachable:
+
+```bash
+aws ssm put-parameter --name /guardian/admin-api-key --type SecureString \
+  --value "$(openssl rand -hex 24)"
+# then add to taskdef-backend.json "secrets":
+#   {"name": "ADMIN_API_KEY", "valueFrom": "arn:aws:ssm:<REGION>:<ACCOUNT>:parameter/guardian/admin-api-key"}
+# and call with:  curl -H "X-Admin-Key: <value>" https://<YOUR_DOMAIN>/api/rag/retrieve ...
+```
+
 **SSE streaming — raise the idle timeout.** `/api/chat` streams tokens over Server-Sent Events;
 the ALB's default 60 s idle timeout cuts long answers off mid-stream. Set **300 seconds**:
 

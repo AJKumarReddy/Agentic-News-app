@@ -5,6 +5,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.security import require_admin
 from app.database.repositories import ConversationRepository
 from app.database.session import get_session
 from app.services.chat_service import chat_once, chat_stream, detect_route
@@ -32,7 +33,7 @@ class IntentRequest(BaseModel):
     article_id: str | None = Field(default=None, max_length=512)
 
 
-@router.post("/intent")
+@router.post("/intent", dependencies=[Depends(require_admin)])
 async def detect_intent(
     request: IntentRequest,
     session: AsyncSession = Depends(get_session),
@@ -40,7 +41,10 @@ async def detect_intent(
 ):
     """Run only the routing agent and return its decision — no search, no
     answer. Useful for checking why a question went to the web vs the
-    Guardian, and for testing routing changes without spending a chat turn."""
+    Guardian, and for testing routing changes without spending a chat turn.
+
+    Operator-only: it still costs an LLM call per request, and nothing in the
+    UI calls it."""
     return await detect_route(session, request.message, request.conversation_id, request.article_id, client_id)
 
 

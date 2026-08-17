@@ -47,15 +47,10 @@ def create_app() -> FastAPI:
         openapi_url=None if settings.is_production else "/openapi.json",
     )
 
-    # CORS: explicit origins only — never "*" in production
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=settings.cors_origins,
-        allow_credentials=True,
-        allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
-        allow_headers=["Content-Type", "Authorization", "X-API-Key", "X-Client-Id"],
-    )
-    # Middleware executes in reverse order of registration (last added = innermost)
+    # Starlette inserts each new middleware at the front of the stack, so the
+    # LAST one added is the OUTERMOST. Registration order below is therefore
+    # innermost → outermost, and the resulting stack matches the docstring in
+    # app.core.security.
     app.add_middleware(TimeoutMiddleware, timeout_seconds=settings.request_timeout_seconds)
     app.add_middleware(
         RateLimitMiddleware,
@@ -65,6 +60,18 @@ def create_app() -> FastAPI:
     app.add_middleware(ApiKeyMiddleware, api_key=settings.api_key)
     app.add_middleware(BodySizeLimitMiddleware, max_bytes=settings.max_body_bytes)
     app.add_middleware(SecurityHeadersMiddleware)
+    # CORS outermost, so responses the middlewares below short-circuit — 401,
+    # 413, 429, 504 — still carry the CORS headers. Registered first, it ended
+    # up innermost and never saw them: a cross-origin caller got an opaque
+    # browser CORS failure instead of the status that was actually returned.
+    # Explicit origins only, never "*".
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_origins,
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+        allow_headers=["Content-Type", "Authorization", "X-API-Key", "X-Client-Id", "X-Admin-Key"],
+    )
     if settings.allowed_hosts_list:
         from starlette.middleware.trustedhost import TrustedHostMiddleware
 
