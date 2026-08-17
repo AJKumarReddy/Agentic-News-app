@@ -23,7 +23,7 @@ from dataclasses import replace
 from datetime import date, datetime, time, timedelta
 from typing import Any
 
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langgraph.graph import END, StateGraph
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -178,6 +178,37 @@ def _evidence_block(evidence: list[dict]) -> str:
     return "\n".join(publisher_lines + web_lines)
 
 
+#: Prior turns replayed into the synthesis call. Enough for the model to know
+#: what it already said without crowding out the evidence it must answer from.
+HISTORY_TURNS = 6
+HISTORY_TURN_CHARS = 700
+_CITATION_MARKER = re.compile(r"\s*\[\d+\]")
+
+
+def _history_messages(history: list[dict]) -> list[Any]:
+    """Recent turns as real chat messages for the synthesis call.
+
+    Without these the model saw only the current question and the evidence, so
+    it could not answer "what did you just tell me" or build on its own last
+    answer — the conversation had no memory below the resolution step.
+
+    Citation markers are stripped: their numbers refer to the sources of the
+    turn that produced them, and carrying "[2]" into a turn with a different
+    source list invites the model to reuse a number that now means something
+    else.
+    """
+    messages: list[Any] = []
+    for turn in history[-HISTORY_TURNS:]:
+        content = _CITATION_MARKER.sub("", (turn.get("content") or "").strip())
+        if not content:
+            continue
+        if len(content) > HISTORY_TURN_CHARS:
+            content = f"{content[:HISTORY_TURN_CHARS]}…"
+        role = turn.get("role")
+        messages.append(AIMessage(content=content) if role == "assistant" else HumanMessage(content=content))
+    return messages
+
+
 def _window_label(state: AgentState) -> str:
     """The requested period, phrased for a UI notice."""
     start, end = state.get("from_date"), state.get("to_date")
@@ -279,9 +310,19 @@ def build_agent_graph(session: AsyncSession, understanding_llm=None, synthesis_l
     async def article_evidence_node(state: AgentState) -> dict[str, Any]:
         """The article is known — read it directly. No search, no filters."""
         article_id = state.get("conversation_state", {}).get("active_article_id", "")
-        article = await tools.get_source_article(article_id) if article_id else None
+        article = await tools.get_source_article(article_id, session) if article_id else None
         if article is None:
-            return {"evidence": [], "sources": [], **_advance(state, "article_evidence")}
+            # The pinned article resolves to nothing — usually a conversation
+            # still carrying an article it moved on from turns ago. Say so in
+            # the state so the pin can be released, and let the turn fall
+            # through to search rather than answering with nothing.
+            log_event(logger, "article_unavailable", article_id=article_id[:120])
+            return {
+                "evidence": [],
+                "sources": [],
+                "article_used": False,
+                **_advance(state, "article_evidence"),
+            }
         source = {
             "n": 1,
             "type": "publisher",
@@ -305,7 +346,12 @@ def build_agent_graph(session: AsyncSession, understanding_llm=None, synthesis_l
                 "text": article.body_text[:ARTICLE_BODY_CHARS],
             }
         ]
-        return {"evidence": evidence, "sources": [source], **_advance(state, "article_evidence")}
+        return {
+            "evidence": evidence,
+            "sources": [source],
+            "article_used": True,
+            **_advance(state, "article_evidence"),
+        }
 
     async def news_evidence_node(state: AgentState) -> dict[str, Any]:
         """Guardian path: fetch fresh articles, index, retrieve, rerank."""
@@ -454,8 +500,11 @@ def build_agent_graph(session: AsyncSession, understanding_llm=None, synthesis_l
             date_window=_window_label(state) if state.get("date_explicit") else "",
         )
         llm = synthesis_llm or get_chat_model(temperature=0.2, streaming=True, max_tokens=1800)
+        prior = _history_messages(state.get("history", []))
         answer = response_text(
-            await llm.ainvoke([SystemMessage(content=SYSTEM_PROMPT), HumanMessage(content=prompt)])
+            await llm.ainvoke(
+                [SystemMessage(content=SYSTEM_PROMPT), *prior, HumanMessage(content=prompt)]
+            )
         )
         cited = {int(n) for n in re.findall(r"\[(\d+)\]", answer)}
         sources = state.get("sources", [])
@@ -481,6 +530,15 @@ def build_agent_graph(session: AsyncSession, understanding_llm=None, synthesis_l
             "BOTH": "news_evidence",
             "DECLINE": "decline",
         }.get(state.get("mode", "NEWS"), "news_evidence")
+
+    def route_after_article(state: AgentState) -> str:
+        """A pinned article that yielded nothing falls through to search.
+
+        Refusing to answer because a stale article id would not resolve is a
+        dead end for a question the news index can usually answer perfectly
+        well.
+        """
+        return "synthesize" if state.get("article_used") else "news_evidence"
 
     def route_after_news(state: AgentState) -> str:
         if not settings.tavily_api_key:
@@ -512,7 +570,11 @@ def build_agent_graph(session: AsyncSession, understanding_llm=None, synthesis_l
         },
     )
     graph.add_edge("decline", END)
-    graph.add_edge("article_evidence", "synthesize")
+    graph.add_conditional_edges(
+        "article_evidence",
+        route_after_article,
+        {"news_evidence": "news_evidence", "synthesize": "synthesize"},
+    )
     graph.add_conditional_edges(
         "news_evidence", route_after_news, {"web_evidence": "web_evidence", "synthesize": "synthesize"}
     )

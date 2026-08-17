@@ -18,6 +18,7 @@ from app.rag.ingestion import ingest_articles
 from app.rag.reranker import rerank_chunks
 from app.rag.retrieval import hybrid_retrieve
 from app.rag.vector_store import RetrievalFilters, ScoredChunk
+from app.services.cache import cache_get, cache_set
 from app.services.search_service import search_news
 from app.websearch.client import WebResult, get_web_client
 
@@ -64,15 +65,49 @@ async def search_publishers(
         return []
 
 
-async def get_source_article(article_id: str) -> NormalizedArticle | None:
-    """Retrieve one article from whichever publisher owns its id."""
+#: An article-anchored conversation re-reads the same article every turn, and
+#: its text does not change between them. Long enough to cover a chat, short
+#: enough that a correction still reaches the reader.
+ARTICLE_CACHE_TTL = 1800
+
+
+async def get_source_article(
+    article_id: str, session: AsyncSession | None = None
+) -> NormalizedArticle | None:
+    """Retrieve one article by id: cache, then publisher, then our own store.
+
+    Every turn of an article conversation used to spend a publisher request on
+    the same article, so an ordinary chat could exhaust a rate-limited
+    developer key — and once it did, the article became unfetchable and every
+    remaining turn answered "no sources". Caching removes the repeat requests;
+    the stored copy covers the case where the publisher is unreachable anyway.
+    Reporting no sources for an article sitting in our own database is a
+    failure of plumbing, not an absence of evidence.
+    """
+    cache_key = f"article:{article_id}"
+    cached = await cache_get(cache_key)
+    if cached is not None:
+        return NormalizedArticle.model_validate(cached)
+
     source = source_for_article(article_id)
-    if source is None:
-        return None
-    try:
-        return await source.get_article(article_id)
-    except NewsSourceError:
-        return None
+    article = None
+    if source is not None:
+        try:
+            article = await source.get_article(article_id)
+        except NewsSourceError:
+            article = None
+
+    if article is None and session is not None:
+        from app.database.repositories import ArticleRepository, to_normalized
+
+        row = await ArticleRepository(session).get(article_id)
+        if row is not None:
+            logger.info("serving article %s from store", article_id)
+            article = to_normalized(row)
+
+    if article is not None:
+        await cache_set(cache_key, article.model_dump(mode="json"), ttl=ARTICLE_CACHE_TTL)
+    return article
 
 
 async def index_guardian_articles(

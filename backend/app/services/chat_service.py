@@ -52,6 +52,13 @@ def _sse(event: str, data: dict[str, Any]) -> str:
 
 def _updated_state(previous: dict, final: dict) -> dict:
     topics = final.get("topics") or []
+    # Release a pinned article once it stops resolving. The client sends
+    # article_id only on the "Ask AI" message that opens the chat, so the id
+    # used to be carried forward unconditionally and forever: a conversation
+    # that had long moved on still routed every turn to that article, and once
+    # the id stopped resolving, every remaining turn answered "no sources".
+    # A turn that reached article evidence and found nothing clears the pin.
+    stale_article = final.get("mode") == "ARTICLE" and final.get("article_used") is False
     return {
         "topic": topics[0] if topics else previous.get("topic", ""),
         "entities": final.get("entities") or previous.get("entities", []),
@@ -59,8 +66,10 @@ def _updated_state(previous: dict, final: dict) -> dict:
             "from_date": final.get("from_date") or "",
             "to_date": final.get("to_date") or "",
         },
-        "active_article_id": previous.get("active_article_id", ""),
-        "active_article_headline": previous.get("active_article_headline", ""),
+        "active_article_id": "" if stale_article else previous.get("active_article_id", ""),
+        "active_article_headline": (
+            "" if stale_article else previous.get("active_article_headline", "")
+        ),
         "previous_intent": final.get("intent", ""),
         "last_sources": final.get("sources", [])[:10],
     }
@@ -81,9 +90,11 @@ async def _prepare(
     if article_id:
         state["active_article_id"] = article_id
 
-    # Real turns, not a flattened summary: the understanding step needs to
-    # resolve references like "related news" against what was actually said.
-    previous = await repo.get_recent_messages(conversation.id, n=6)
+    # Real turns, not a flattened summary: the understanding step resolves
+    # references like "related news" against what was actually said, and
+    # synthesis replays them so the model knows what it has already answered.
+    # Deeper than the resolver needs — a recap of the chat reads all of it.
+    previous = await repo.get_recent_messages(conversation.id, n=12)
     history = [{"role": m.role, "content": m.content} for m in previous]
 
     await repo.add_message(conversation, "user", message)
@@ -229,7 +240,12 @@ async def chat_stream(
                         stage = _NEXT_STAGE.get((update or {}).get("mode", "NEWS"), "news_evidence")
                     elif node_name == "news_evidence":
                         stage = "web_evidence" if final_state.get("mode") == "BOTH" else "synthesize"
-                    elif node_name in ("article_evidence", "web_evidence"):
+                    elif node_name == "article_evidence":
+                        # an unresolvable article falls through to search
+                        stage = (
+                            "synthesize" if (update or {}).get("article_used") else "news_evidence"
+                        )
+                    elif node_name == "web_evidence":
                         stage = "synthesize"
                     else:
                         stage = None
