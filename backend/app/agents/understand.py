@@ -121,6 +121,37 @@ _FOLLOW_UP = re.compile(
     re.IGNORECASE,
 )
 
+# Naming the piece the reader is looking at.
+_ARTICLE_REFERENCE = re.compile(
+    r"\b(?:this|that|the) (?:article|piece|story|report|coverage|headline|author)\b"
+    r"|\bin (?:this|the) (?:article|piece|story)\b"
+    r"|\b(?:summari[sz]e|explain|simplify|translate) (?:this|it)\b",
+    re.IGNORECASE,
+)
+# Leaning on the article without naming it: "what does it say about X".
+_DEICTIC = re.compile(r"\b(it|its|this|that|they|them|their|he|she|his|her)\b", re.IGNORECASE)
+# ...except when the "this" points at the conversation, not the article.
+_ABOUT_CHAT = re.compile(
+    r"\b(?:this|our|the) (?:chat|conversation|discussion|thread|session)\b", re.IGNORECASE
+)
+
+
+def refers_to_article(message: str) -> bool:
+    """Is this message actually about the article the reader is viewing?
+
+    An open article used to make *every* message an article question, so a
+    conversation that had moved on to another subject kept being answered from
+    a piece nobody had mentioned in ten turns. A self-contained question about
+    something else is not an article question just because an article is open.
+    """
+    if _ABOUT_CHAT.search(message):
+        return False
+    if _ARTICLE_REFERENCE.search(message):
+        return True
+    # short and leaning on a pronoun, or a bare follow-up — both point back at
+    # whatever is on screen
+    return len(message.strip()) < 80 and bool(_DEICTIC.search(message) or _FOLLOW_UP.match(message))
+
 
 def _valid_iso(value: str | None, today: date | None = None) -> str | None:
     """Keep only well-formed, non-future ISO dates.
@@ -166,7 +197,7 @@ def heuristic_understanding(
     is_follow_up = bool(_FOLLOW_UP.match(message)) and len(message) < 80
     standalone = f"{message} (about: {subject})" if is_follow_up and subject else message
 
-    if active_article and not _EXPLICIT_WEB.search(message):
+    if active_article and refers_to_article(message) and not _EXPLICIT_WEB.search(message):
         mode = "ARTICLE"
     elif _EXPLICIT_WEB.search(message):
         mode = "BOTH" if (subject or active_article) else "WEB"

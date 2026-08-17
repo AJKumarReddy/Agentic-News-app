@@ -27,6 +27,7 @@ class AgentState(TypedDict, total=False):
     reference: bool  # reference lookup — older pages are acceptable
 
     # Evidence
+    article_used: bool  # the pinned article resolved; False releases the pin
     evidence: list[dict[str, Any]]
     sources: list[dict[str, Any]]
     notice: str  # UI metadata (e.g. widened window) — never prose in the answer
