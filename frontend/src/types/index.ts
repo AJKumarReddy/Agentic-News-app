@@ -48,7 +48,7 @@ export interface Source {
   author: string;
 }
 
-export type ChatRoute = 'ARTICLE' | 'NEWS' | 'WEB' | 'BOTH';
+export type ChatRoute = 'ARTICLE' | 'NEWS' | 'WEB' | 'BOTH' | 'DECLINE';
 
 export interface RouteDecision {
   route: ChatRoute;

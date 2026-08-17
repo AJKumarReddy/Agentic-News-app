@@ -21,6 +21,22 @@ describe('RouteBadge', () => {
     expect(screen.getByText('News + Web')).toBeInTheDocument();
   });
 
+  it('labels an out-of-scope request without an interpretation', () => {
+    render(
+      <RouteBadge
+        routing={{
+          route: 'DECLINE',
+          intent: 'QA',
+          standalone_question: 'how do I reverse a linked list in python',
+        }}
+      />,
+    );
+    expect(screen.getByText('Out of scope')).toBeInTheDocument();
+    // showing "understood as …" would suggest the request was taken up
+    expect(screen.queryByText(/understood as/)).not.toBeInTheDocument();
+    expect(screen.queryByText('qa')).not.toBeInTheDocument();
+  });
+
   it('shows how a terse follow-up was interpreted', () => {
     render(
       <RouteBadge

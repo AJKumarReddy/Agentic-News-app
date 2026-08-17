@@ -1,9 +1,14 @@
-"""Controlled LangGraph agent with four answering modes.
+"""Controlled LangGraph agent with four answering modes and a refusal.
 
     understand ──┬── ARTICLE ─→ article_evidence ─┐
                  ├── NEWS ────→ news_evidence ────┤
                  ├── WEB ─────→ web_evidence ─────┼─→ synthesize
-                 └── BOTH ────→ news_evidence ─→ web_evidence ─┘
+                 ├── BOTH ────→ news_evidence ─→ web_evidence ─┘
+                 └── DECLINE ─→ decline ─→ END
+
+DECLINE short-circuits everything: no search, no LLM call, no sources. It is
+the terminal node for requests this assistant does not serve — see
+app.agents.scope for what qualifies and why the check is deterministic.
 
 Each mode does only the work it needs. Answering about an article the user is
 already viewing does not search, filter, or rerank anything — the article is
@@ -22,6 +27,7 @@ from langgraph.graph import END, StateGraph
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents import tools
+from app.agents.scope import DECLINE_MESSAGE
 from app.agents.state import AgentState
 from app.agents.understand import understand
 from app.core.config import get_settings
@@ -209,7 +215,23 @@ def build_agent_graph(session: AsyncSession, understanding_llm=None, synthesis_l
             "output_format": result.output_format,
             "freshness": result.freshness,
             "reference": result.reference,
+            "reason": result.reason,
             **_advance(state, "understand"),
+        }
+
+    async def decline_node(state: AgentState) -> dict[str, Any]:
+        """Out of scope: answer with the fixed message and stop.
+
+        No LLM and no retrieval — a generated refusal could still drift into
+        answering, and an empty source list keeps the UI from implying this
+        text was sourced from journalism.
+        """
+        log_event(logger, "declined", reason=state.get("reason", ""), user_query=state["query"][:150])
+        return {
+            "answer": DECLINE_MESSAGE,
+            "evidence": [],
+            "sources": [],
+            **_advance(state, "decline"),
         }
 
     async def article_evidence_node(state: AgentState) -> dict[str, Any]:
@@ -371,6 +393,7 @@ def build_agent_graph(session: AsyncSession, understanding_llm=None, synthesis_l
             "WEB": "web_evidence",
             "NEWS": "news_evidence",
             "BOTH": "news_evidence",
+            "DECLINE": "decline",
         }.get(state.get("mode", "NEWS"), "news_evidence")
 
     def route_after_news(state: AgentState) -> str:
@@ -385,6 +408,7 @@ def build_agent_graph(session: AsyncSession, understanding_llm=None, synthesis_l
 
     graph = StateGraph(AgentState)
     graph.add_node("understand", understand_node)
+    graph.add_node("decline", decline_node)
     graph.add_node("article_evidence", article_evidence_node)
     graph.add_node("news_evidence", news_evidence_node)
     graph.add_node("web_evidence", web_evidence_node)
@@ -398,8 +422,10 @@ def build_agent_graph(session: AsyncSession, understanding_llm=None, synthesis_l
             "article_evidence": "article_evidence",
             "news_evidence": "news_evidence",
             "web_evidence": "web_evidence",
+            "decline": "decline",
         },
     )
+    graph.add_edge("decline", END)
     graph.add_edge("article_evidence", "synthesize")
     graph.add_conditional_edges(
         "news_evidence", route_after_news, {"web_evidence": "web_evidence", "synthesize": "synthesize"}

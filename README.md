@@ -58,6 +58,7 @@ flowchart TB
 |---|---|---|
 | Vector DB | **PostgreSQL + pgvector** | One database serves relational data *and* vectors — no second service to run, and writes stay transactional. One container locally, one RDS instance in production. `rag/vector_store.py` is small enough to swap for Qdrant if scale demands it. |
 | Agent | **LangGraph, four modes** | `understand` resolves the message, then routes to ARTICLE / NEWS / WEB / BOTH. Each mode does only its own work, so an article question never touches the search machinery. Bounded and debuggable — no runaway autonomy. |
+| Scope | **Deterministic guardrail** | Task requests (write code, solve maths, ghostwrite, roleplay) are declined by regex in `agents/scope.py` before any search or model call — a guardrail that asks the model to police itself fails exactly when the model misreads the request. News *about* those subjects is unaffected. |
 | Query resolution | **Resolve before searching** | Follow-ups ("search youtube for related news", "now do a google search") are rewritten against the conversation *first*. Searching the raw words was the single largest source of wrong answers. |
 | Multi-source | **Adapter per publisher** | Every source returns the same `NormalizedArticle`, so retrieval, chunking, citations and the UI are source-agnostic. Adding a newsroom is one adapter. |
 | Fair ranking | **Per-source retrieval** | Publishers expose wildly different text lengths (NYT gives abstracts only). A shared candidate pool silently excluded NYT entirely, so retrieval runs per source and merges. |
