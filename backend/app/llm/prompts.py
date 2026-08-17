@@ -74,11 +74,19 @@ def build_synthesis_prompt(
     output_format: str = "",
     widened: bool = False,
     has_web: bool = False,
+    date_window: str = "",
 ) -> str:
     parts = [
         f"HOW TO SHAPE THE ANSWER:\n{INTENT_GUIDANCE.get(intent, INTENT_GUIDANCE['QA'])}",
         f"CITATION POLICY:\n{CITATION_POLICY.get(mode, CITATION_POLICY['NEWS'])}",
     ]
+    if date_window:
+        # The evidence is already filtered to the window; this stops the model
+        # reaching for remembered events outside it and dating them vaguely.
+        parts.append(
+            f"PERIOD ASKED ABOUT: {date_window}. Every source below falls inside it. "
+            "Give each development its date, and do not add events you are not shown."
+        )
     if widened:
         parts.append(
             "NOTE: the evidence may fall outside the exact period asked about. Include each "
@@ -90,6 +98,13 @@ def build_synthesis_prompt(
         )
     if evidence_block:
         parts.append(f"EVIDENCE (numbered sources):\n{evidence_block}")
+    elif date_window:
+        # Answering from memory here would defeat the date filter entirely.
+        parts.append(
+            f"EVIDENCE: none. No indexed reporting falls within {date_window}. Say exactly that "
+            "in one sentence, naming the period, and suggest widening it. Do not answer from "
+            "memory and do not offer events from outside the period."
+        )
     else:
         parts.append(
             "EVIDENCE: none was retrieved. Say in one sentence that you couldn't find sources "

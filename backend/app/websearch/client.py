@@ -8,7 +8,7 @@ reporting; nothing here is ever presented as Guardian journalism.
 """
 
 import logging
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from urllib.parse import urlparse
 
 import httpx
@@ -56,19 +56,63 @@ def _domain(url: str) -> str:
         return ""
 
 
-def _age_days(published: str) -> int | None:
+def published_on(published: str) -> date | None:
+    """The calendar date a result was published, across Tavily's formats."""
     if not published:
         return None
     for fmt in ("%Y-%m-%d", "%a, %d %b %Y %H:%M:%S %Z", "%Y-%m-%dT%H:%M:%S"):
         try:
             parsed = datetime.strptime(published[:len("Mon, 01 Jan 2026 00:00:00 GMT")].strip(), fmt)
-            return (datetime.now() - parsed).days
+            return parsed.date()
         except ValueError:
             continue
     try:
-        return (datetime.now(timezone.utc) - datetime.fromisoformat(published.replace("Z", "+00:00"))).days
+        return datetime.fromisoformat(published.replace("Z", "+00:00")).date()
     except ValueError:
         return None
+
+
+def _age_days(published: str) -> int | None:
+    parsed = published_on(published)
+    return None if parsed is None else (datetime.now(timezone.utc).date() - parsed).days
+
+
+def within_range(
+    results: list["WebResult"],
+    from_date: str | None,
+    to_date: str | None,
+    keep_undated: bool = True,
+) -> list["WebResult"]:
+    """Drop results published outside the requested range.
+
+    Tavily can only be asked for "the last N days", so it cannot express a
+    historical window at all and is loose even about the recent one. Enforcing
+    the range here is what keeps a web citation inside the same period the
+    publisher results were filtered to.
+
+    `keep_undated` decides the fate of a result Tavily gave no date for: kept
+    when the window was our own inference, dropped when the user stated it,
+    since an undated page cannot be shown to satisfy a stated constraint.
+    """
+    try:
+        start = date.fromisoformat(from_date) if from_date else None
+        end = date.fromisoformat(to_date) if to_date else None
+    except ValueError:
+        return results
+
+    kept = []
+    for result in results:
+        published = published_on(result.published_date)
+        if published is None:
+            if keep_undated:
+                kept.append(result)
+            continue
+        if start and published < start:
+            continue
+        if end and published > end:
+            continue
+        kept.append(result)
+    return kept
 
 
 def requested_domains(message: str) -> list[str]:

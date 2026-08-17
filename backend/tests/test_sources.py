@@ -193,6 +193,52 @@ async def test_article_search_401_falls_back_to_top_stories():
     assert calls["search"] == 1
 
 
+async def test_top_stories_browse_honours_the_date_range():
+    """Top Stories takes no date parameters, so the range is applied to its
+    results — otherwise a keyword-free browse ignores the filter entirely."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=TOP_STORIES_PAYLOAD)
+
+    source = make_nyt(handler)
+    assert await source.search("", from_date="2026-08-11", to_date="2026-08-12") == []
+    inside = await source.search("", from_date="2026-08-10", to_date="2026-08-10")
+    assert [a.article_id for a in inside] == ["nyt://article/top-1", "nyt://article/top-2"]
+
+
+async def test_top_stories_fallback_honours_the_date_range():
+    """The 401 fallback must not become a way around the filter."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "articlesearch" in str(request.url):
+            return httpx.Response(401, json={"fault": {"faultstring": "Invalid ApiKey"}})
+        return httpx.Response(200, json=TOP_STORIES_PAYLOAD)
+
+    source = make_nyt(handler)
+    assert await source.search("senate spending", from_date="2026-09-01") == []
+
+
+def test_within_dates_bounds_are_inclusive_and_drop_undated():
+    from datetime import timezone
+    from types import SimpleNamespace
+
+    from app.sources.nyt import within_dates
+
+    def article(published):
+        return SimpleNamespace(published_at=published)
+
+    items = [
+        article(datetime(2026, 3, 1, tzinfo=timezone.utc)),
+        article(datetime(2026, 3, 31, tzinfo=timezone.utc)),
+        article(datetime(2026, 4, 1, tzinfo=timezone.utc)),
+        article(None),
+    ]
+    kept = within_dates(items, "2026-03-01", "2026-03-31")
+    assert len(kept) == 2
+    # no range means no filtering, undated included
+    assert len(within_dates(items, None, None)) == 4
+
+
 async def test_top_stories_normalizes_correctly():
     source = make_nyt(lambda r: httpx.Response(200, json=TOP_STORIES_PAYLOAD))
     articles = await source.top_stories("us-news")

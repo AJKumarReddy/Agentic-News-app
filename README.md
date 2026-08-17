@@ -65,6 +65,7 @@ flowchart TB
 | Web fallback | **Tavily, gated** | Results exclude our own publishers' domains, must pass relevance/recency/low-signal-domain gates, and are cited separately. Disabled entirely without `TAVILY_API_KEY`. |
 | Edition | **US desk preferred** | Guardian `productionOffice` is stored per article and nudges ranking. A nudge, not a filter — a better UK/AUS match still wins. |
 | Freshness | **API-first for "latest/today"** | Recency questions are answered from *current* API results indexed on the fly, never from stale vectors with high semantic scores. |
+| Date ranges | **Stated ranges are never widened** | A range the user wrote ("in March", "last week") is a constraint: if nothing was published in it, the answer says so. Only a window we *inferred* — the 7 days behind a bare "latest" — is relaxed when it comes back empty, and the widening is reported in the UI. The same range bounds publisher retrieval, NYT's Top Stories feed, and web results. |
 | Dedup | **Article ID + SHA-256 content hash** | An article is embedded once; re-embedding only when content or the embedding model changes. |
 | Streaming | **Server-Sent Events** | Route decision, pipeline status and answer tokens stream into the UI. |
 

@@ -190,11 +190,14 @@ async def fetch_and_index(
 async def compare_articles(
     session: AsyncSession,
     subjects: list[str],
-    from_date: str | None = None,
-    to_date: str | None = None,
+    filters: RetrievalFilters | None = None,
 ) -> dict[str, list[ScoredChunk]]:
-    """Gather evidence per subject for comparison answers."""
-    filters = RetrievalFilters.from_iso(from_date, to_date)
+    """Gather evidence per subject for comparison answers.
+
+    Takes the caller's filters whole. Rebuilding them here from a pair of date
+    strings silently dropped every other constraint the user set — a section
+    filter never reached a comparison.
+    """
     evidence: dict[str, list[ScoredChunk]] = {}
     per_subject = max(3, get_settings().rag_final_top_k // max(1, len(subjects)))
     for subject in subjects[:4]:
@@ -206,11 +209,9 @@ async def compare_articles(
 async def build_timeline(
     session: AsyncSession,
     topic: str,
-    from_date: str | None = None,
-    to_date: str | None = None,
+    filters: RetrievalFilters | None = None,
 ) -> list[ScoredChunk]:
     """Retrieve related chunks and order them chronologically."""
-    filters = RetrievalFilters.from_iso(from_date, to_date)
     chunks = await retrieve_rag(session, topic, filters=filters, freshness=False, rerank=True)
     return sorted(
         chunks,

@@ -135,6 +135,73 @@ async def test_timeout_returns_empty():
     assert await make_client(handler).search("x") == []
 
 
+# ── requested date range ──────────────────────────────────────────
+# Tavily can only express "the last N days", so the range is enforced here.
+
+def dated(published: str, domain: str = "reuters.com") -> WebResult:
+    return WebResult(
+        title="t", url=f"https://{domain}/{published or 'x'}", content="c",
+        source=domain, published_date=published,
+    )
+
+
+def test_within_range_drops_results_outside_the_window():
+    from app.websearch.client import within_range
+
+    results = [dated("2026-02-27"), dated("2026-03-15"), dated("2026-04-02")]
+    kept = within_range(results, "2026-03-01", "2026-03-31")
+    assert [r.published_date for r in kept] == ["2026-03-15"]
+
+
+def test_within_range_bounds_are_inclusive():
+    from app.websearch.client import within_range
+
+    results = [dated("2026-03-01"), dated("2026-03-31")]
+    assert len(within_range(results, "2026-03-01", "2026-03-31")) == 2
+
+
+def test_within_range_keeps_undated_results_for_an_inferred_window():
+    from app.websearch.client import within_range
+
+    results = [dated(""), dated("2026-03-15")]
+    assert len(within_range(results, "2026-03-01", "2026-03-31", keep_undated=True)) == 2
+
+
+def test_within_range_drops_undated_results_for_a_stated_window():
+    from app.websearch.client import within_range
+
+    # an undated page cannot be shown to satisfy a range the user stated
+    results = [dated(""), dated("2026-03-15")]
+    kept = within_range(results, "2026-03-01", "2026-03-31", keep_undated=False)
+    assert [r.published_date for r in kept] == ["2026-03-15"]
+
+
+def test_within_range_is_a_no_op_on_unparseable_bounds():
+    from app.websearch.client import within_range
+
+    results = [dated("2026-03-15")]
+    assert within_range(results, "not-a-date", None) == results
+
+
+def test_web_days_reaches_back_to_the_window_start():
+    from datetime import date, timedelta
+
+    from app.agents.graph import WEB_DEFAULT_DAYS, _web_days
+
+    from app.agents.graph import WEB_MAX_DAYS
+
+    start = date.today() - timedelta(days=90)
+    assert _web_days({"from_date": start.isoformat()}) == 91
+    assert _web_days({}) == WEB_DEFAULT_DAYS
+    assert _web_days({"reference": True}) is None
+    assert _web_days({"from_date": "garbage"}) == WEB_DEFAULT_DAYS
+    # a stated period outranks the reference exemption
+    assert _web_days({"from_date": start.isoformat(), "reference": True}) == 91
+    # an unbounded lookback would be rejected outright
+    ancient = (date.today() - timedelta(days=4000)).isoformat()
+    assert _web_days({"from_date": ancient}) == WEB_MAX_DAYS
+
+
 def test_web_evidence_continues_guardian_numbering():
     sources = [
         {"n": 1, "type": "guardian", "url": "https://www.theguardian.com/a", "headline": "G1"},
