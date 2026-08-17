@@ -19,6 +19,7 @@ answers where it made no sense.
 
 import logging
 import re
+from dataclasses import replace
 from datetime import date, datetime, time, timedelta
 from typing import Any
 
@@ -35,7 +36,7 @@ from app.core.logging import log_event
 from app.llm.client import get_chat_model, response_text
 from app.llm.prompts import SYSTEM_PROMPT, build_synthesis_prompt
 from app.rag.vector_store import RetrievalFilters, ScoredChunk
-from app.websearch.client import requested_domains
+from app.websearch.client import requested_domains, within_range
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +45,13 @@ WEB_EVIDENCE_SHARE = 0.35
 ARTICLE_BODY_CHARS = 12000
 SEARCH_LOOKBACK_DAYS = 3
 RELAX_WINDOW_DAYS = 14
+# Recency window for web search when the question names no period. This is a
+# news assistant; stale documentation pages were being cited as reporting.
+WEB_DEFAULT_DAYS = 30
+# Tavily rejects an unbounded lookback, so a range older than this simply
+# returns no web evidence — publisher retrieval still answers, and a result
+# outside the requested range is worse than one fewer source.
+WEB_MAX_DAYS = 365
 
 
 # ── evidence assembly ────────────────────────────────────────────────
@@ -170,6 +178,39 @@ def _evidence_block(evidence: list[dict]) -> str:
     return "\n".join(publisher_lines + web_lines)
 
 
+def _window_label(state: AgentState) -> str:
+    """The requested period, phrased for a UI notice."""
+    start, end = state.get("from_date"), state.get("to_date")
+    if start and end:
+        return start if start == end else f"{start} to {end}"
+    if start:
+        return f"since {start}"
+    if end:
+        return f"up to {end}"
+    return "that period"
+
+
+def _web_days(state: AgentState) -> int | None:
+    """Tavily's recency window for this turn.
+
+    Tavily only expresses "the last N days", so a historical range is requested
+    as a lookback reaching back to its start and the results are filtered to the
+    range afterwards. Without this the web leg ran a flat 30-day window and
+    returned last month's pages for a question about March.
+    """
+    from_date = state.get("from_date")
+    if from_date:
+        # a stated period outranks the reference exemption
+        try:
+            span = (date.today() - date.fromisoformat(from_date)).days + 1
+            return min(WEB_MAX_DAYS, max(1, span))
+        except ValueError:
+            pass
+    if state.get("reference"):
+        return None  # a reference lookup may legitimately cite older pages
+    return WEB_DEFAULT_DAYS
+
+
 def _build_filters(state: AgentState) -> RetrievalFilters:
     filters = RetrievalFilters.from_iso(
         state.get("from_date"),
@@ -209,6 +250,7 @@ def build_agent_graph(session: AsyncSession, understanding_llm=None, synthesis_l
             "topics": result.topics,
             "from_date": result.from_date,
             "to_date": result.to_date,
+            "date_explicit": result.date_explicit,
             "section": result.section,
             "news_query": result.news_query,
             "web_query": result.web_query,
@@ -291,13 +333,14 @@ def build_agent_graph(session: AsyncSession, understanding_llm=None, synthesis_l
 
         question = state["standalone_question"]
         filters = _build_filters(state)
+        # Every branch retrieves under the same filters. They used to be rebuilt
+        # per intent from a subset of the slots, which is how TIMELINE lost its
+        # end date and COMPARISON lost its section.
         if intent == "COMPARISON" and len(state.get("entities", [])) >= 2:
-            groups = await tools.compare_articles(
-                session, state["entities"], state.get("from_date"), state.get("to_date")
-            )
+            groups = await tools.compare_articles(session, state["entities"], filters=filters)
         elif intent == "TIMELINE":
             topic = ", ".join(state.get("entities", []) or state.get("topics", [])) or question
-            groups = {"default": await tools.build_timeline(session, topic, state.get("from_date"))}
+            groups = {"default": await tools.build_timeline(session, topic, filters=filters)}
         else:
             groups = {
                 "default": await tools.retrieve_rag(
@@ -305,26 +348,59 @@ def build_agent_graph(session: AsyncSession, understanding_llm=None, synthesis_l
                 )
             }
 
-        # Widen rather than returning nothing when a narrow window misses.
-        # The widening is reported as UI metadata, never as prose in the answer.
+        # Widening only ever applies to a window *we* inferred. A range the user
+        # stated is a constraint: if nothing was published in it, the honest
+        # answer is that nothing was published in it. Silently answering from
+        # outside the window is what made date filtering look broken.
         notice = ""
         if not any(groups.values()) and (filters.from_date or filters.sections):
-            for window, label in (
-                (RELAX_WINDOW_DAYS, f"Last {RELAX_WINDOW_DAYS} days"),
-                (None, "All indexed reporting"),
-            ):
-                wider = RetrievalFilters(article_ids=filters.article_ids)
-                if window is not None and filters.from_date:
-                    wider.from_date = filters.from_date - timedelta(days=window)
-                fallback = await tools.retrieve_rag(session, question, filters=wider, freshness=True)
-                if fallback:
-                    groups = {"default": fallback}
-                    notice = f"Results from {label}"
-                    break
+            if state.get("date_explicit"):
+                # Scoped to newsroom reporting: the web leg may still find
+                # sources inside the same window, and this notice sits beside
+                # their citations.
+                notice = f"No newsroom coverage in {_window_label(state)}"
+            else:
+                # Loosen one constraint at a time, widest last, so the answer
+                # stays as close to what was asked as the index allows.
+                ladder: list[tuple[str, RetrievalFilters]] = []
+                if filters.from_date:
+                    ladder.append(
+                        (
+                            f"Last {RELAX_WINDOW_DAYS} days",
+                            replace(
+                                filters,
+                                from_date=filters.from_date - timedelta(days=RELAX_WINDOW_DAYS),
+                            ),
+                        )
+                    )
+                ladder.append(
+                    ("All indexed reporting", replace(filters, from_date=None, to_date=None))
+                )
+                if filters.sections:
+                    ladder.append(
+                        (
+                            "All sections",
+                            replace(filters, from_date=None, to_date=None, sections=[]),
+                        )
+                    )
+                for label, wider in ladder:
+                    fallback = await tools.retrieve_rag(
+                        session, question, filters=wider, freshness=True
+                    )
+                    if fallback:
+                        groups = {"default": fallback}
+                        notice = f"Results from {label}"
+                        break
 
         evidence, sources = _chunks_to_evidence(groups)
         log_event(
-            logger, "news_evidence", found=stats.get("found", 0), sources=len(sources), widened=bool(notice)
+            logger,
+            "news_evidence",
+            found=stats.get("found", 0),
+            sources=len(sources),
+            date_range=f"{state.get('from_date') or ''}..{state.get('to_date') or ''}",
+            date_explicit=bool(state.get("date_explicit")),
+            widened=bool(notice) and not state.get("date_explicit"),
         )
         return {
             "evidence": evidence,
@@ -335,10 +411,7 @@ def build_agent_graph(session: AsyncSession, understanding_llm=None, synthesis_l
 
     async def web_evidence_node(state: AgentState) -> dict[str, Any]:
         query = state.get("web_query") or state["standalone_question"]
-        # Recency is the default: this is a news assistant, and stale
-        # documentation pages were being cited as current reporting. Only
-        # explicit reference lookups (how-to, definitions) skip the window.
-        days = None if state.get("reference") else 30
+        days = _web_days(state)
         # honor sites the user named explicitly, even filtered ones
         results = await tools.search_web(
             query,
@@ -346,6 +419,17 @@ def build_agent_graph(session: AsyncSession, understanding_llm=None, synthesis_l
             news_like=bool(days),
             allow_domains=requested_domains(state["query"]),
         )
+        # Tavily's window only bounds the start, and it bounds it loosely. The
+        # requested range is enforced here so a web citation can't fall outside
+        # the period the publisher results were held to.
+        if state.get("from_date") or state.get("to_date"):
+            results = within_range(
+                results,
+                state.get("from_date"),
+                state.get("to_date"),
+                # an undated page can't be shown to fall inside a stated range
+                keep_undated=not state.get("date_explicit"),
+            )
         evidence, sources = _web_to_evidence(
             results, list(state.get("evidence", [])), list(state.get("sources", []))
         )
@@ -364,8 +448,10 @@ def build_agent_graph(session: AsyncSession, understanding_llm=None, synthesis_l
             mode=state.get("mode", "NEWS"),
             intent=state.get("intent", "QA"),
             output_format=state.get("output_format", ""),
-            widened=bool(state.get("notice")),
+            widened=bool(state.get("notice")) and not state.get("date_explicit"),
             has_web=bool(state.get("web_used")),
+            # only a stated period is a constraint worth naming to the model
+            date_window=_window_label(state) if state.get("date_explicit") else "",
         )
         llm = synthesis_llm or get_chat_model(temperature=0.2, streaming=True, max_tokens=1800)
         answer = response_text(

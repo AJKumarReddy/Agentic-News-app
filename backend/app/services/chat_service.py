@@ -137,6 +137,7 @@ async def detect_route(
         "entities": result.entities,
         "topics": result.topics,
         "date_range": {"from": result.from_date, "to": result.to_date},
+        "date_explicit": result.date_explicit,
         "section": result.section,
         "news_query": result.news_query,
         "web_query": result.web_query,

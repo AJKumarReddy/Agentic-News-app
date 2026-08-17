@@ -3,9 +3,16 @@
 The understanding step may also propose ISO dates, but for the well-known
 phrases below this parser is authoritative — deterministic behavior beats
 model variance for date math.
+
+A range carries whether the user *stated* it or we *inferred* it. That
+distinction decides how strictly retrieval enforces it: "articles from March"
+is a constraint and must never be quietly widened, while the 7-day window
+behind a bare "latest" is our own guess and may be relaxed when it finds
+nothing. Conflating the two is what made date filtering look unreliable.
 """
 
 import re
+from dataclasses import dataclass
 from datetime import date, timedelta
 
 from dateutil.relativedelta import relativedelta
@@ -25,19 +32,57 @@ _WORD_NUMBERS = {
 }
 
 
+_MONTHS = (
+    "january|february|march|april|may|june|july|august|september|october|november|december"
+    "|jan|feb|mar|apr|jun|jul|aug|sept?|oct|nov|dec"
+)
+
+# A date the user actually wrote down, in any of the forms a model might then
+# turn into ISO. Used to tell a stated range from an inferred one when the
+# range came from the model rather than from the patterns below.
+_WRITTEN_DATE = re.compile(
+    rf"\b(?:{_MONTHS})\b|\b(?:19|20)\d{{2}}\b|\b\d{{4}}-\d{{2}}-\d{{2}}\b"
+    r"|\b\d{1,2}/\d{1,2}(?:/\d{2,4})?\b|\bq[1-4]\b|\bbetween\b.{0,30}\band\b",
+    re.IGNORECASE,
+)
+
+
+@dataclass(frozen=True)
+class DateRange:
+    from_date: str
+    to_date: str
+    # True when the user stated the range; False when we inferred it from a
+    # freshness word. Only inferred ranges may be widened by retrieval.
+    explicit: bool = True
+
+    @property
+    def span(self) -> tuple[str, str]:
+        return self.from_date, self.to_date
+
+
 def _replace_word_numbers(text: str) -> str:
     for word, number in _WORD_NUMBERS.items():
         text = re.sub(rf"\b{word}\b", str(number), text)
     return text
 
 
-def parse_date_range(text: str, today: date | None = None) -> tuple[str, str] | None:
-    """Return (from_date, to_date) as ISO strings, or None if no expression found."""
+def mentions_written_date(text: str) -> bool:
+    """Did the user write a date themselves (month, year, ISO, 12/03)?
+
+    The model fills `from_date`/`to_date` for phrasings this module doesn't
+    parse ("between 5 and 20 January"). Those are stated ranges too, and this
+    is how we know not to widen them.
+    """
+    return bool(_WRITTEN_DATE.search(text))
+
+
+def parse_date_range(text: str, today: date | None = None) -> DateRange | None:
+    """Resolve a natural-language date expression, or None if there isn't one."""
     today = today or date.today()
     lowered = _replace_word_numbers(text.lower())
 
-    def span(start: date, end: date) -> tuple[str, str]:
-        return start.isoformat(), end.isoformat()
+    def span(start: date, end: date, explicit: bool = True) -> DateRange:
+        return DateRange(start.isoformat(), end.isoformat(), explicit)
 
     if re.search(r"\btoday\b", lowered):
         return span(today, today)
@@ -71,8 +116,9 @@ def parse_date_range(text: str, today: date | None = None) -> tuple[str, str] | 
     if match:
         return span(today - relativedelta(months=int(match.group(1))), today)
     if re.search(r"\b(latest|recent|recently|breaking|current)\b", lowered):
-        # Freshness terms without an explicit range → last 7 days
-        return span(today - timedelta(days=7), today)
+        # Freshness terms carry no range — 7 days is our inference, not the
+        # user's instruction, so retrieval is free to widen it.
+        return span(today - timedelta(days=7), today, explicit=False)
     return None
 
 

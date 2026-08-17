@@ -8,7 +8,7 @@ is small enough to reimplement against Qdrant later if scale demands it.
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime, time
+from datetime import datetime, time, timezone
 from typing import Sequence
 
 from sqlalchemy import Float, bindparam, func, select, text
@@ -16,6 +16,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import defer
 
 from app.database.models import Chunk
+
+
+def _utc(value: datetime) -> datetime:
+    """Anchor a bound to UTC so it compares predictably against timestamptz."""
+    return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
 
 
 @dataclass
@@ -38,10 +43,16 @@ class RetrievalFilters:
         tags: list[str] | None = None,
         article_ids: list[str] | None = None,
     ) -> "RetrievalFilters":
-        """Build filters from ISO date strings; to_date is inclusive (end of day)."""
+        """Build filters from ISO date strings; to_date is inclusive (end of day).
+
+        Bounds are made UTC-aware to match `Chunk.published_at`, which is
+        `timestamptz`. A naive bound is interpreted in the database session's
+        timezone, so the window silently shifted by hours wherever that was not
+        UTC — enough to drop articles published near midnight.
+        """
         return cls(
-            from_date=datetime.fromisoformat(from_date) if from_date else None,
-            to_date=datetime.combine(datetime.fromisoformat(to_date).date(), time.max)
+            from_date=_utc(datetime.fromisoformat(from_date)) if from_date else None,
+            to_date=_utc(datetime.combine(datetime.fromisoformat(to_date).date(), time.max))
             if to_date
             else None,
             sections=sections or [],

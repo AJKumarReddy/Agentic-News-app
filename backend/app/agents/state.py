@@ -18,6 +18,7 @@ class AgentState(TypedDict, total=False):
     topics: list[str]
     from_date: str | None
     to_date: str | None
+    date_explicit: bool  # user stated the range — retrieval must not widen it
     section: str | None
     news_query: str
     web_query: str

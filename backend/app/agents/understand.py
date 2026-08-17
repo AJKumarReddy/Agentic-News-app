@@ -18,7 +18,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import date
 
-from app.agents.dateparse import detect_freshness, parse_date_range
+from app.agents.dateparse import detect_freshness, mentions_written_date, parse_date_range
 from app.agents.scope import out_of_scope_reason
 from app.core.logging import log_event
 from app.llm.client import extract_json, response_text
@@ -44,6 +44,9 @@ class Understanding:
     topics: list[str] = field(default_factory=list)
     from_date: str | None = None
     to_date: str | None = None
+    # The user stated the range, so retrieval must not widen it. False when the
+    # window was inferred from a freshness word.
+    date_explicit: bool = False
     section: str | None = None
     news_query: str = ""
     web_query: str = ""
@@ -117,6 +120,23 @@ _FOLLOW_UP = re.compile(
     r"related|now |then |the do|do a|search )",
     re.IGNORECASE,
 )
+
+
+def _valid_iso(value: str | None, today: date | None = None) -> str | None:
+    """Keep only well-formed, non-future ISO dates.
+
+    The model fills these slots and sometimes writes "last week", "2026-13-45",
+    or a date in the future. An unparseable value used to raise inside
+    retrieval and fail the whole turn; a future one silently matched nothing,
+    which looked identical to a broken filter.
+    """
+    if not value:
+        return None
+    try:
+        parsed = date.fromisoformat(str(value)[:10])
+    except (ValueError, TypeError):
+        return None
+    return None if parsed > (today or date.today()) else parsed.isoformat()
 
 
 def _format_history(messages: list[dict], limit: int = 6) -> str:
@@ -221,10 +241,23 @@ async def understand(
     if result is None:
         result = heuristic_understanding(message, history, active_article)
 
+    # Model-supplied dates are slots, not facts: validate before they reach SQL.
+    today_date = date.fromisoformat(today)
+    result.from_date = _valid_iso(result.from_date, today_date)
+    result.to_date = _valid_iso(result.to_date, today_date)
+    if result.from_date and result.to_date and result.to_date < result.from_date:
+        # an inverted range matches nothing, which reads as a broken filter
+        result.from_date, result.to_date = result.to_date, result.from_date
+    # A range the model produced counts as stated only if the user wrote a date.
+    result.date_explicit = bool(result.from_date or result.to_date) and mentions_written_date(
+        message
+    )
+
     # Deterministic date parsing wins over model guesses
-    parsed = parse_date_range(message)
+    parsed = parse_date_range(message, today_date)
     if parsed:
-        result.from_date, result.to_date = parsed
+        result.from_date, result.to_date = parsed.span
+        result.date_explicit = parsed.explicit
     result.freshness = detect_freshness(message)
     result.reference = bool(_NON_NEWS.match(message)) or bool(
         _NON_NEWS.match(result.standalone_question)
@@ -250,6 +283,7 @@ async def understand(
         result.news_query = ""
         result.web_query = ""
         result.from_date = result.to_date = result.section = None
+        result.date_explicit = False
     else:
         if not result.news_query:
             result.news_query = result.standalone_question[:120]
@@ -265,5 +299,7 @@ async def understand(
         intent=result.intent,
         news_query=result.news_query[:80],
         web_query=result.web_query[:80],
+        date_range=f"{result.from_date or ''}..{result.to_date or ''}",
+        date_explicit=result.date_explicit,
     )
     return result

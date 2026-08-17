@@ -83,6 +83,37 @@ def _iso_compact(value: str | None) -> str | None:
     return value.replace("-", "") if value else None
 
 
+def within_dates(
+    articles: list[NormalizedArticle], from_date: str | None, to_date: str | None
+) -> list[NormalizedArticle]:
+    """Keep only articles published inside the requested range.
+
+    Article Search takes begin_date/end_date, but Top Stories is a live feed
+    with no date parameters at all — and Top Stories serves every request when
+    the key lacks Article Search, plus every keyword-free section browse. Those
+    paths returned whatever the feed held regardless of the range asked for,
+    which is the NYT half of "the date filter is not followed".
+    """
+    if not from_date and not to_date:
+        return articles
+    try:
+        start = datetime.fromisoformat(from_date).date() if from_date else None
+        end = datetime.fromisoformat(to_date).date() if to_date else None
+    except ValueError:
+        return articles
+
+    kept = []
+    for article in articles:
+        published = article.published_at
+        if published is None:
+            continue  # undated articles cannot be shown to satisfy the range
+        day = published.date()
+        if (start and day < start) or (end and day > end):
+            continue
+        kept.append(article)
+    return kept
+
+
 def _absolute(url: str) -> str:
     if not url:
         return ""
@@ -316,7 +347,8 @@ class NYTSource(NewsSource):
         # "news" and return almost nothing.
         if not query.strip():
             self._last_hits = None
-            feed = await self.top_stories(section)
+            # the feed carries no date parameters, so the range is applied here
+            feed = within_dates(await self.top_stories(section), from_date, to_date)
             self._last_feed_size = len(feed)
             # Top Stories has no server-side paging, so page within the feed —
             # slicing its head every time served the same articles on page 2, 3…
@@ -328,7 +360,9 @@ class NYTSource(NewsSource):
         # dropping NYT from results entirely.
         if self._article_search_enabled is False:
             self._last_hits = None
-            return await self._top_stories_fallback(query, section, page_size, page)
+            return await self._top_stories_fallback(
+                query, section, page_size, page, from_date, to_date
+            )
         try:
             return await self._article_search(
                 query, from_date, to_date, section, order_by, page, page_size
@@ -340,13 +374,23 @@ class NYTSource(NewsSource):
                 logger.warning(
                     "NYT Article Search is not enabled for this key; using Top Stories instead"
                 )
-                return await self._top_stories_fallback(query, section, page_size, page)
+                return await self._top_stories_fallback(
+                    query, section, page_size, page, from_date, to_date
+                )
             raise
 
     async def _top_stories_fallback(
-        self, query: str, section: str | None, page_size: int, page: int = 1
+        self,
+        query: str,
+        section: str | None,
+        page_size: int,
+        page: int = 1,
+        from_date: str | None = None,
+        to_date: str | None = None,
     ) -> list[NormalizedArticle]:
-        articles = await self.top_stories(section)
+        # Article Search would have applied the range server-side; this feed
+        # cannot, so the same constraint is applied to its results.
+        articles = within_dates(await self.top_stories(section), from_date, to_date)
         terms = [t for t in query.lower().split() if len(t) > 3]
         if terms:
             scored = [
