@@ -17,6 +17,11 @@ describe('ThemeToggle', () => {
     expect(onSelect).toHaveBeenCalledWith('dark');
   });
 
+  it('names the setting, so "Light / Dark" is not the only thing on screen', () => {
+    render(<ThemeToggle theme="light" onSelect={() => {}} />);
+    expect(screen.getByText('Theme')).toBeInTheDocument();
+  });
+
   it('exposes both options as a labelled radio group', () => {
     render(<ThemeToggle theme="light" onSelect={() => {}} />);
     expect(screen.getByRole('radiogroup', { name: /colour theme/i })).toBeInTheDocument();
