@@ -83,6 +83,13 @@ export function useChat() {
               case 'article':
                 setActiveArticle(event.article.article_id ? event.article : null);
                 break;
+              case 'done':
+                // the stored row's id — what playback asks for
+                if (event.message_id !== undefined) {
+                  const messageId = event.message_id;
+                  updateAssistant((m) => ({ ...m, id: messageId }));
+                }
+                break;
               case 'error':
                 flushTokens();
                 updateAssistant((m) => ({

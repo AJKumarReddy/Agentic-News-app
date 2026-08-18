@@ -209,6 +209,15 @@ This is the part most likely to mislead a reader, so it's enforced end to end:
 - NYT entries are **abstracts, not full articles**, and the prompt says so, so the model never implies it read the whole piece.
 - The UI renders web citations in amber with a `Web · domain` label, distinct from newsroom citations.
 
+### 4. Spoken answers
+
+Answers can be read aloud through the OpenAI speech API. Two independent gates govern it: `TTS_ENABLED` decides whether the feature exists in a deployment, and each reader's own preference — kept in their browser and **off by default** — decides whether anything is ever spoken. Nothing is spent until someone opts in.
+
+- **Addressed by stored message, never by text.** `POST /api/audio/speech` takes a conversation id and a message id, and resolves them through the same ownership check that guards `GET /api/conversations/{id}`. Accepting raw text would make the endpoint an open relay for speech billed to our key.
+- **The prose is prepared first.** `app/core/text.py` strips citation markers, headings, bullets and link URLs, and drops tables whole — a listener hears "bracket one" as a defect, not as a source. That module also owns the citation regex the agent graph uses for history replay, so both agree on what a citation is.
+- **Its own rate-limit bucket.** With autoplay on, every turn is a chat request *and* an audio request; sharing the chat budget would halve usable chat throughput and the 429 would read as a broken chat.
+- **Cached on the text**, not the message, so the same answer reached from another conversation is free. Redis holds it for an hour — audio dwarfs the JSON around it under an LRU cap — and the browser caches the long tail.
+
 ---
 
 ## News sources
@@ -282,16 +291,18 @@ Chats are scoped to an anonymous per-browser id (`X-Client-Id`), so one visitor 
 | `POST /api/rag/ingest` | index by article ids and/or a search query |
 | `GET /api/conversations` · `GET /api/conversations/{id}` | chat history, scoped to `X-Client-Id` |
 | `DELETE /api/conversations/{id}` · `DELETE /api/conversations` | delete one chat / clear history |
+| `POST /api/audio/speech` | audio for one stored answer; `{"conversation_id", "message_id"}` → `audio/mpeg`, `204` when nothing is speakable |
+| `GET /api/capabilities` | which optional features this deployment can serve, so the UI hides what it cannot |
 | `GET /api/health` | database, vector extension, cache and each publisher |
 
 ## Testing
 
 ```bash
-cd backend && pytest -q     # 119 tests
-cd frontend && npm test     # 17 tests
+cd backend && pytest -q     # 319 tests
+cd frontend && npm test     # 38 tests
 ```
 
-Covers the Guardian and NYT adapters (mocked HTTP), chunking, dedup, RRF fusion, edition boost, source diversity, reranking, routing and resolution, the scheduler's lock, security middleware, API contracts, the SSE parser and citation components.
+Covers the Guardian and NYT adapters (mocked HTTP), chunking, dedup, RRF fusion, edition boost, source diversity, reranking, routing and resolution, date parsing and filtering, scope refusals, the scheduler's lock, security middleware, speech text preparation and playback ownership, API contracts, the SSE parser and citation components.
 
 **RAG evaluation** — 20 questions against a running stack with real keys:
 
@@ -428,7 +439,8 @@ environment in Settings → Environments turns every deploy into an approval gat
 - [x] API keys server-side only; the React bundle never sees them
 - [x] Optional `X-API-Key` gate for the whole API (constant-time comparison)
 - [x] CORS restricted to explicit origins; optional Host allowlist
-- [x] Per-IP rate limiting (30/min general, 10/min for `/api/chat`) with idle-key eviction
+- [x] Per-IP rate limiting (30/min general, 10/min for `/api/chat`, 20/min for `/api/audio/*`) with idle-key eviction
+- [x] Answer playback names a stored message, never raw text, so it can't relay arbitrary TTS on our key
 - [x] Request body cap (64 KB) and time-to-first-byte timeout (120 s)
 - [x] Content-Security-Policy on API responses and the SPA
 - [x] Secure headers (nosniff, frame-deny, referrer policy); HTTPS terminated at the ALB

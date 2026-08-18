@@ -33,6 +33,7 @@ from app.agents.state import AgentState
 from app.agents.understand import understand
 from app.core.config import get_settings
 from app.core.logging import log_event
+from app.core.text import CITATION_MARKER
 from app.llm.client import get_chat_model, response_text
 from app.llm.prompts import SYSTEM_PROMPT, build_synthesis_prompt
 from app.rag.vector_store import RetrievalFilters, ScoredChunk
@@ -183,7 +184,6 @@ def _evidence_block(evidence: list[dict]) -> str:
 #: what it already said without crowding out the evidence it must answer from.
 HISTORY_TURNS = 6
 HISTORY_TURN_CHARS = 700
-_CITATION_MARKER = re.compile(r"\s*\[\d+\]")
 
 
 def _history_messages(history: list[dict]) -> list[Any]:
@@ -200,7 +200,7 @@ def _history_messages(history: list[dict]) -> list[Any]:
     """
     messages: list[Any] = []
     for turn in history[-HISTORY_TURNS:]:
-        content = _CITATION_MARKER.sub("", (turn.get("content") or "").strip())
+        content = CITATION_MARKER.sub("", (turn.get("content") or "").strip())
         if not content:
             continue
         if len(content) > HISTORY_TURN_CHARS:

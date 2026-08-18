@@ -207,6 +207,21 @@ class ConversationRepository:
         )
         return list(result.scalars())
 
+    async def get_message(self, conversation_id: str, message_id: int) -> Message | None:
+        """One message, scoped to the conversation it belongs to.
+
+        Message ids are sequential integers, so scoping by conversation is what
+        stops a caller reading somebody else's message by guessing one — the
+        conversation itself is ownership-checked by `get` before this runs.
+        """
+        result = await self.session.execute(
+            select(Message).where(
+                Message.id == message_id,
+                Message.conversation_id == conversation_id,
+            )
+        )
+        return result.scalars().first()
+
     async def get_recent_messages(self, conversation_id: str, n: int = 8) -> list[Message]:
         """Last n messages in chronological order, without loading the full history."""
         result = await self.session.execute(

@@ -64,7 +64,11 @@ export class SSEParser {
           },
         };
       case 'done':
-        return { type: 'done' };
+        // carries the stored message id so playback can name this answer
+        return {
+          type: 'done',
+          message_id: typeof data.message_id === 'number' ? data.message_id : undefined,
+        };
       case 'error':
         return { type: 'error', detail: String(data.detail ?? 'Unknown error') };
       default:

@@ -4,9 +4,20 @@ from fastapi import APIRouter
 
 from app.database.session import check_db, check_vector_extension
 from app.services.cache import cache_get, cache_set, check_redis
+from app.services.tts_service import speech_enabled
 from app.sources import enabled_sources
 
 router = APIRouter(tags=["health"])
+
+
+@router.get("/capabilities")
+async def capabilities():
+    """What this deployment can actually do, for the UI to shape itself around.
+
+    Kept out of /api/health, which is a monitoring surface the SPA never calls.
+    A control the backend cannot serve should not be rendered at all.
+    """
+    return {"tts": speech_enabled()}
 
 
 @router.get("/health")

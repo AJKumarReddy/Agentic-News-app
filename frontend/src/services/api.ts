@@ -1,6 +1,7 @@
 import axios from 'axios';
 import type {
   ArticleIntelligence,
+  Capabilities,
   ChatStreamEvent,
   ConversationSummary,
   NewsSourceInfo,
@@ -55,6 +56,32 @@ export async function getArticleIntelligence(articleId: string): Promise<Article
   return data;
 }
 
+export async function getCapabilities(): Promise<Capabilities> {
+  const { data } = await http.get<Capabilities>('/capabilities');
+  return data;
+}
+
+/**
+ * Audio for one stored answer. Resolves to null when the answer has nothing
+ * speakable in it (a table, say) — the server says 204 and there is no error
+ * to report. Throws on a real failure.
+ */
+export async function fetchSpeech(
+  conversationId: string,
+  messageId: number,
+  signal?: AbortSignal,
+): Promise<Blob | null> {
+  const response = await fetch(`${API_BASE}/audio/speech`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...COMMON_HEADERS },
+    signal,
+    body: JSON.stringify({ conversation_id: conversationId, message_id: messageId }),
+  });
+  if (response.status === 204) return null;
+  if (!response.ok) throw new Error(`Speech request failed (${response.status})`);
+  return await response.blob();
+}
+
 export async function listConversations(): Promise<ConversationSummary[]> {
   const { data } = await http.get<ConversationSummary[]>('/conversations');
   return data;
@@ -64,7 +91,7 @@ export interface ConversationDetail {
   id: string;
   title: string;
   state?: { active_article_id?: string; active_article_headline?: string };
-  messages: { role: 'user' | 'assistant'; content: string; sources: Source[] }[];
+  messages: { id: number; role: 'user' | 'assistant'; content: string; sources: Source[] }[];
 }
 
 export async function getConversation(id: string): Promise<ConversationDetail> {

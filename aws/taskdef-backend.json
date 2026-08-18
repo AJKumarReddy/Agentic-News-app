@@ -84,6 +84,22 @@
         {
           "name": "CHAT_RATE_LIMIT_PER_MINUTE",
           "value": "10"
+        },
+        {
+          "name": "AUDIO_RATE_LIMIT_PER_MINUTE",
+          "value": "20"
+        },
+        {
+          "name": "TTS_ENABLED",
+          "value": "true"
+        },
+        {
+          "name": "TTS_MODEL",
+          "value": "gpt-4o-mini-tts"
+        },
+        {
+          "name": "TTS_VOICE",
+          "value": "alloy"
         }
       ],
       "secrets": [

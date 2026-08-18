@@ -53,10 +53,21 @@ _EXPENSIVE_PATHS = {"/api/chat", "/api/intent"}
 _EXPENSIVE_SUFFIXES = ("/intelligence",)
 
 
+#: Answer playback. Kept out of `_EXPENSIVE_PATHS` on purpose: sharing the chat
+#: bucket would make every turn cost two requests against one budget once
+#: autoplay is on, halving usable chat throughput — and the resulting 429 reads
+#: to the user as a broken chat rather than as throttled audio.
+_AUDIO_PREFIX = "/api/audio/"
+
+
 def is_expensive(path: str) -> bool:
     return path in _EXPENSIVE_PATHS or path.startswith("/api/rag/") or path.endswith(
         _EXPENSIVE_SUFFIXES
     )
+
+
+def is_audio(path: str) -> bool:
+    return path.startswith(_AUDIO_PREFIX)
 
 
 def client_ip(request: Request) -> str:
@@ -173,16 +184,29 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     embeddings or LLM calls get their own, stricter budget — see
     `is_expensive`."""
 
-    def __init__(self, app, limit_per_minute: int = 30, chat_limit_per_minute: int = 10):
+    def __init__(
+        self,
+        app,
+        limit_per_minute: int = 30,
+        chat_limit_per_minute: int = 10,
+        audio_limit_per_minute: int = 20,
+    ):
         super().__init__(app)
         self.limiter = RateLimiter(limit_per_minute)
         self.chat_limiter = RateLimiter(chat_limit_per_minute)
+        self.audio_limiter = RateLimiter(audio_limit_per_minute)
 
     async def dispatch(self, request: Request, call_next) -> Response:
         if request.url.path in EXEMPT_PATHS or request.method == "OPTIONS":
             return await call_next(request)
         # separate limiter instances already namespace the buckets
-        limiter = self.chat_limiter if is_expensive(request.url.path) else self.limiter
+        path = request.url.path
+        if is_audio(path):
+            limiter = self.audio_limiter
+        elif is_expensive(path):
+            limiter = self.chat_limiter
+        else:
+            limiter = self.limiter
         if not limiter.allow(client_ip(request)):
             return JSONResponse(
                 status_code=429,

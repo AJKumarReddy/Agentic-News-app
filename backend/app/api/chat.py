@@ -154,7 +154,14 @@ async def get_conversation(
         "title": conversation.title,
         "state": conversation.state,
         "messages": [
-            {"role": m.role, "content": m.content, "sources": m.sources, "created_at": m.created_at}
+            {
+                # the id lets a reopened chat play its answers back
+                "id": m.id,
+                "role": m.role,
+                "content": m.content,
+                "sources": m.sources,
+                "created_at": m.created_at,
+            }
             for m in messages
         ],
     }
