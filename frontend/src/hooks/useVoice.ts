@@ -1,5 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
-import { getCapabilities } from '../services/api';
+import { useCallback, useState } from 'react';
 
 export type VoicePref = 'on' | 'off';
 
@@ -34,28 +33,17 @@ function initialVoice(): VoicePref {
  * difference is that theme falls back to an OS signal when unset and voice has
  * none, so unset simply means off — nobody should be spoken to unasked.
  *
- * `available` comes from the backend. A deployment with no OpenAI key or with
- * TTS switched off should not render a control that cannot work.
+ * `available` is passed in rather than probed here. A deployment with no
+ * OpenAI key or with TTS switched off should not render a control that cannot
+ * work — but voice input gates on the same request, so App fetches the
+ * capabilities once and hands each feature the flag it cares about.
  */
-export function useVoice() {
+export function useVoice(available: boolean) {
   const [voice, setVoiceState] = useState<VoicePref>(initialVoice);
-  const [available, setAvailable] = useState(false);
   // the suggestion is answered by choosing either way, not only by accepting
   const [nudged, setNudged] = useState(
     () => read(NUDGE_KEY) !== null || read(STORAGE_KEY) !== null,
   );
-
-  useEffect(() => {
-    let cancelled = false;
-    getCapabilities()
-      .then((capabilities) => {
-        if (!cancelled) setAvailable(Boolean(capabilities.tts));
-      })
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   const setVoice = useCallback((next: VoicePref) => {
     write(STORAGE_KEY, next);

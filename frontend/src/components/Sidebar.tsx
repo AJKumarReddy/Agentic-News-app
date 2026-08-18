@@ -197,12 +197,20 @@ export default function Sidebar({
         </div>
       </div>
 
-      <div className="space-y-1.5 border-t border-white/10 p-2">
-        <ThemeToggle theme={theme} onSelect={onSelectTheme} />
-        {/* only when the backend can actually serve it — a control that
-            cannot work is worse than no control */}
-        {voiceAvailable && <VoiceToggle voice={voice} onSelect={onSelectVoice} />}
-      </div>
+      <section aria-label="Settings" className="border-t border-white/10 px-3 py-3">
+        <h2 className="mb-2.5 px-1 text-[10px] font-semibold uppercase tracking-[0.09em] text-white/30">
+          Settings
+        </h2>
+        {/* roomier than the rest of the rail on purpose: these two rows are
+            each a name plus a control, and at the list's spacing the names
+            crowd the buttons above them */}
+        <div className="space-y-3">
+          <ThemeToggle theme={theme} onSelect={onSelectTheme} />
+          {/* only when the backend can actually serve it — a control that
+              cannot work is worse than no control */}
+          {voiceAvailable && <VoiceToggle voice={voice} onSelect={onSelectVoice} />}
+        </div>
+      </section>
 
       <div className="border-t border-white/10 px-5 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] text-[10px] leading-relaxed text-white/30">
         {sources.length > 0 ? (

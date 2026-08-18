@@ -1,74 +1,58 @@
-import { act, renderHook, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, renderHook } from '@testing-library/react';
+import { beforeEach, describe, expect, it } from 'vitest';
 
-vi.mock('../services/api', () => ({
-  getCapabilities: vi.fn(async () => ({ tts: true })),
-}));
-
-import { getCapabilities } from '../services/api';
 import { useVoice } from './useVoice';
 
-/** Mount and let the capabilities probe settle, so its resolution never
- *  lands outside act() and warns. */
-async function mount() {
-  const rendered = renderHook(() => useVoice());
-  await act(async () => undefined);
-  return rendered;
+/** Availability is passed in now — App probes the backend once and hands this
+ *  hook the flag — so these tests need no network stub at all. */
+function mount(available = true) {
+  return renderHook(() => useVoice(available));
 }
 
 describe('useVoice', () => {
   beforeEach(() => {
     localStorage.clear();
-    vi.mocked(getCapabilities).mockResolvedValue({ tts: true });
   });
 
-  it('defaults to off so nobody is spoken to unasked', async () => {
-    const { result } = await mount();
+  it('defaults to off so nobody is spoken to unasked', () => {
+    const { result } = mount();
     expect(result.current.voice).toBe('off');
   });
 
-  it('persists the choice across mounts', async () => {
-    const first = await mount();
+  it('persists the choice across mounts', () => {
+    const first = mount();
     act(() => first.result.current.setVoice('on'));
     expect(first.result.current.voice).toBe('on');
 
-    const second = await mount();
+    const second = mount();
     expect(second.result.current.voice).toBe('on');
   });
 
-  it('reads availability from the backend', async () => {
-    const { result } = await mount();
-    await waitFor(() => expect(result.current.available).toBe(true));
+  it('reports the availability it was given', () => {
+    expect(mount(true).result.current.available).toBe(true);
+    expect(mount(false).result.current.available).toBe(false);
   });
 
-  it('hides the feature when the backend cannot serve it', async () => {
-    vi.mocked(getCapabilities).mockResolvedValue({ tts: false });
-    const { result } = await mount();
-    await waitFor(() => expect(result.current.available).toBe(false));
-  });
-
-  it('offers the suggestion only until the reader answers it', async () => {
-    const { result } = await mount();
+  it('offers the suggestion only until the reader answers it', () => {
+    const { result } = mount();
     expect(result.current.nudged).toBe(false);
 
     act(() => result.current.dismissNudge());
     expect(result.current.nudged).toBe(true);
 
     // and never again, in this or any later session
-    const later = await mount();
-    expect(later.result.current.nudged).toBe(true);
+    expect(mount().result.current.nudged).toBe(true);
   });
 
-  it('treats turning voice on as answering the suggestion', async () => {
-    const { result } = await mount();
+  it('treats turning voice on as answering the suggestion', () => {
+    const { result } = mount();
     act(() => result.current.setVoice('on'));
     expect(result.current.nudged).toBe(true);
   });
 
-  it('treats an explicit off as answering it too', async () => {
-    const { result } = await mount();
+  it('treats an explicit off as answering it too', () => {
+    const { result } = mount();
     act(() => result.current.setVoice('off'));
-    const later = await mount();
-    expect(later.result.current.nudged).toBe(true);
+    expect(mount().result.current.nudged).toBe(true);
   });
 });

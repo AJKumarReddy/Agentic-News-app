@@ -59,7 +59,13 @@ def create_app() -> FastAPI:
         audio_limit_per_minute=settings.audio_rate_limit_per_minute,
     )
     app.add_middleware(ApiKeyMiddleware, api_key=settings.api_key)
-    app.add_middleware(BodySizeLimitMiddleware, max_bytes=settings.max_body_bytes)
+    app.add_middleware(
+        BodySizeLimitMiddleware,
+        max_bytes=settings.max_body_bytes,
+        # a recording is far larger than any JSON this API takes; only that
+        # one path gets the room for it
+        overrides={"/api/audio/transcribe": settings.stt_max_bytes},
+    )
     app.add_middleware(SecurityHeadersMiddleware)
     # CORS outermost, so responses the middlewares below short-circuit — 401,
     # 413, 429, 504 — still carry the CORS headers. Registered first, it ended

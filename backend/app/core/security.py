@@ -112,17 +112,31 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
 class BodySizeLimitMiddleware(BaseHTTPMiddleware):
     """Reject requests whose declared body exceeds the limit (default 64 KB —
-    the largest legitimate payload here is a chat message)."""
+    the largest legitimate text payload here is a chat message).
 
-    def __init__(self, app, max_bytes: int = 65536):
+    `overrides` raises the ceiling for specific path prefixes. Uploaded audio is
+    three orders of magnitude larger than any JSON this API takes, and a single
+    global limit would have to be either useless for chat or impossible for a
+    recording. Raising it per path keeps /api/chat tight.
+    """
+
+    def __init__(self, app, max_bytes: int = 65536, overrides: dict[str, int] | None = None):
         super().__init__(app)
         self.max_bytes = max_bytes
+        # longest prefix first, so a specific path wins over a broader one
+        self.overrides = sorted((overrides or {}).items(), key=lambda kv: -len(kv[0]))
+
+    def limit_for(self, path: str) -> int:
+        for prefix, limit in self.overrides:
+            if path.startswith(prefix):
+                return limit
+        return self.max_bytes
 
     async def dispatch(self, request: Request, call_next) -> Response:
         length = request.headers.get("content-length")
         if length is not None:
             try:
-                if int(length) > self.max_bytes:
+                if int(length) > self.limit_for(request.url.path):
                     return JSONResponse(status_code=413, content={"detail": "Request body too large"})
             except ValueError:
                 return JSONResponse(status_code=400, content={"detail": "Invalid Content-Length"})

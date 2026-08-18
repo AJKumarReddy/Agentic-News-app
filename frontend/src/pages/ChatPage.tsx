@@ -26,9 +26,12 @@ const SUGGESTIONS = [
 export default function ChatPage({
   onConversationChange,
   voice,
+  voiceInput = false,
 }: {
   onConversationChange?: () => void;
   voice: ReturnType<typeof useVoice>;
+  /** The backend can transcribe a recording, so the composer may offer a mic. */
+  voiceInput?: boolean;
 }) {
   const {
     messages,
@@ -221,7 +224,7 @@ export default function ChatPage({
             <VoiceNudge onEnable={() => voice.setVoice('on')} onDismiss={voice.dismissNudge} />
           )}
           {activeArticle && <ArticleChip article={activeArticle} onClear={clearArticle} />}
-          <ChatInput onSend={handleSend} busy={busy} onStop={stop} />
+          <ChatInput onSend={handleSend} busy={busy} onStop={stop} voiceInput={voiceInput} />
           <p className="mt-2 text-center text-[11px] leading-tight text-ink-400 dark:text-ink-500 sm:mt-2.5">
             Every claim is cited.{' '}
             <span className="hidden sm:inline">Verify important facts through the linked articles.</span>

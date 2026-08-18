@@ -8,15 +8,22 @@ ownership check that guards `GET /conversations/{id}` guard this too.
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.chat import client_id_header
 from app.core.config import get_settings
+from app.core.security import sanitize_user_text
 from app.core.text import speakable_text
 from app.database.repositories import ConversationRepository
 from app.database.session import get_session
+from app.services.stt_service import (
+    TranscriptionError,
+    audio_extension,
+    transcribe,
+    transcription_enabled,
+)
 from app.services.tts_service import MEDIA_TYPES, SpeechError, speech_enabled, synthesize
 
 logger = logging.getLogger(__name__)
@@ -77,3 +84,45 @@ async def speech(
             "Content-Length": str(len(audio)),
         },
     )
+
+
+@router.post("/transcribe")
+async def transcription(request: Request):
+    """Text for one spoken question.
+
+    The body is the recording itself rather than a multipart form: the only
+    field is the audio, and raw bytes keep `python-multipart` out of the
+    dependency list for no loss.
+
+    This one needs no ownership check — unlike `/speech` it reads nothing back
+    to the caller, it only hands them their own words. What it does need is a
+    ceiling, which BodySizeLimitMiddleware applies per path, and the audio rate
+    limit, which `is_audio` already applies to everything under /api/audio/.
+    """
+    if not transcription_enabled():
+        raise HTTPException(503, "Transcription is not available")
+
+    extension = audio_extension(request.headers.get("content-type", ""))
+    if extension is None:
+        raise HTTPException(415, "Unsupported audio format")
+
+    audio = await request.body()
+    settings = get_settings()
+    # The middleware rejects on a declared Content-Length; a chunked upload
+    # declares none, so the real bytes are checked here as well.
+    if len(audio) > settings.stt_max_bytes:
+        raise HTTPException(413, "Recording too large")
+    if not audio:
+        raise HTTPException(400, "No audio was uploaded")
+
+    try:
+        text = await transcribe(audio, extension=extension)
+    except TranscriptionError as exc:
+        raise HTTPException(502, f"Could not transcribe audio: {exc}") from exc
+
+    if not text:
+        # Stop pressed without speaking. Not a failure — there is simply
+        # nothing to put in the box, and the caller returns to idle.
+        return Response(status_code=204)
+
+    return {"text": sanitize_user_text(text)}

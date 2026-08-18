@@ -4,6 +4,7 @@ from fastapi import APIRouter
 
 from app.database.session import check_db, check_vector_extension
 from app.services.cache import cache_get, cache_set, check_redis
+from app.services.stt_service import transcription_enabled
 from app.services.tts_service import speech_enabled
 from app.sources import enabled_sources
 
@@ -17,7 +18,7 @@ async def capabilities():
     Kept out of /api/health, which is a monitoring surface the SPA never calls.
     A control the backend cannot serve should not be rendered at all.
     """
-    return {"tts": speech_enabled()}
+    return {"tts": speech_enabled(), "stt": transcription_enabled()}
 
 
 @router.get("/health")
