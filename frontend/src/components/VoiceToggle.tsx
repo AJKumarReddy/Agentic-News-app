@@ -2,9 +2,12 @@ import type { VoicePref } from '../hooks/useVoice';
 import SettingRow from './SettingRow';
 import VoiceIcon from './VoiceIcon';
 
+// "Always", not a bare On/Off, because this is a standing preference rather
+// than a play button: it decides whether every future answer is spoken, and
+// the per-answer control in the chat stays available either way.
 const OPTIONS: { value: VoicePref; label: string }[] = [
-  { value: 'off', label: 'Off' },
-  { value: 'on', label: 'On' },
+  { value: 'off', label: 'Always off' },
+  { value: 'on', label: 'Always on' },
 ];
 
 /**

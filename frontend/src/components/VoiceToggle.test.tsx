@@ -8,16 +8,28 @@ describe('VoiceToggle', () => {
     expect(screen.getByText('Read answers aloud')).toBeInTheDocument();
   });
 
+  it('says the choice is a standing one, not a play button', () => {
+    render(<VoiceToggle voice="off" onSelect={() => {}} />);
+    expect(screen.getByRole('radio', { name: 'Always off' })).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: 'Always on' })).toBeInTheDocument();
+  });
+
   it('marks the active preference and only that one', () => {
     render(<VoiceToggle voice="on" onSelect={() => {}} />);
-    expect(screen.getByRole('radio', { name: /^on$/i })).toHaveAttribute('aria-checked', 'true');
-    expect(screen.getByRole('radio', { name: /^off$/i })).toHaveAttribute('aria-checked', 'false');
+    expect(screen.getByRole('radio', { name: 'Always on' })).toHaveAttribute(
+      'aria-checked',
+      'true',
+    );
+    expect(screen.getByRole('radio', { name: 'Always off' })).toHaveAttribute(
+      'aria-checked',
+      'false',
+    );
   });
 
   it('selects the option that was clicked rather than toggling', () => {
     const onSelect = vi.fn();
     render(<VoiceToggle voice="on" onSelect={onSelect} />);
-    screen.getByRole('radio', { name: /^on$/i }).click();
+    screen.getByRole('radio', { name: 'Always on' }).click();
     expect(onSelect).toHaveBeenCalledWith('on');
   });
 
