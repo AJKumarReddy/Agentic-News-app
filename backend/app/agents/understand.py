@@ -78,6 +78,13 @@ Do three things.
    about how to search rather than a topic (e.g. "search youtube for related
    news", "now check the web"), keep the SUBJECT from the conversation and
    express the instruction separately.
+   A message can be grammatically complete and still not self-contained. If it
+   names a person, organisation or thing the conversation has already pinned
+   down, carry that identifying detail into the question AND into the queries:
+   after a thread about Princess Diana's brother, "Who is Charles Spencer?"
+   resolves to "Who is Charles Spencer, Princess Diana's brother?" with a query
+   like "Charles Spencer Earl Spencer Diana brother". Names are ambiguous on
+   their own; the conversation is what says which one is meant.
 
 2. MODE: choose where the answer's evidence comes from.
    "ARTICLE" - the user is asking about the specific article shown above.
@@ -124,7 +131,11 @@ _EXPLICIT_WEB = re.compile(
 # to be listed here too, but app.agents.scope declines those before this runs,
 # so those branches were dead and drifting out of sync with the guardrail.
 _NON_NEWS = re.compile(
-    r"^\s*(how (?:do|to|can) |what is the (?:definition|syntax|formula)|define |explain how )",
+    r"^\s*(how (?:do|to|can) |what is the (?:definition|syntax|formula)|define |explain how "
+    # "who is X" asks who somebody *is*, which the reporting of the last month
+    # rarely states outright. Left off this list it was held to the news
+    # recency window and matched nothing at all.
+    r"|who (?:is|was|are|were) )",
     re.IGNORECASE,
 )
 _FOLLOW_UP = re.compile(
@@ -302,8 +313,14 @@ async def understand(
         result.from_date, result.to_date = parsed.span
         result.date_explicit = parsed.explicit
     result.freshness = detect_freshness(message)
-    result.reference = bool(_NON_NEWS.match(message)) or bool(
-        _NON_NEWS.match(result.standalone_question)
+    # ENTITY is the model's own word for "this asks who or what something is".
+    # Such a question reads like news but wants background, and a recency
+    # window over it is why "Who is <someone in the story>?" came back with no
+    # sources while the same search unrestricted found them immediately.
+    result.reference = (
+        bool(_NON_NEWS.match(message))
+        or bool(_NON_NEWS.match(result.standalone_question))
+        or result.intent == "ENTITY"
     )
 
     # An explicit request to look elsewhere always reaches the web

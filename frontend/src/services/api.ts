@@ -82,6 +82,29 @@ export async function fetchSpeech(
   return await response.blob();
 }
 
+/** Text for one recording, or null when the reader said nothing (204).
+ *
+ * Posts the audio as the whole body rather than a multipart form — the only
+ * field is the recording, and the backend reads the container from
+ * Content-Type. Uses bare fetch for the same reason fetchSpeech does: the
+ * shared axios instance is configured for JSON.
+ */
+export async function transcribeAudio(audio: Blob, signal?: AbortSignal): Promise<string | null> {
+  const response = await fetch(`${API_BASE}/audio/transcribe`, {
+    method: 'POST',
+    // Blob.type carries the codec parameters MediaRecorder chose; the backend
+    // matches on the media type alone. Empty only if the browser gave us an
+    // unnamed default, in which case webm is what it will have produced.
+    headers: { 'Content-Type': audio.type || 'audio/webm', ...COMMON_HEADERS },
+    signal,
+    body: audio,
+  });
+  if (response.status === 204) return null;
+  if (!response.ok) throw new Error(`Transcription failed (${response.status})`);
+  const data = (await response.json()) as { text?: unknown };
+  return typeof data.text === 'string' ? data.text : null;
+}
+
 export async function listConversations(): Promise<ConversationSummary[]> {
   const { data } = await http.get<ConversationSummary[]>('/conversations');
   return data;

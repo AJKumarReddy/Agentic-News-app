@@ -172,3 +172,62 @@ async def test_decline_survives_only_in_the_resolution():
     )
     result = await understand("do that", llm=llm)
     assert result.mode == "DECLINE"
+
+
+# ── identity questions: named, but still not self-contained ───────
+#
+# "Who is Charles Spencer?" after a thread about Diana's brother came back with
+# no sources at all. Two separate faults met: the resolution left the name
+# unqualified because the sentence was already grammatical, and the turn was
+# then held to the news recency window, where a biography does not exist.
+
+DIANA_HISTORY = [
+    {"role": "user", "content": "Tell me about this article: Charles Spencer to publish book about late sister"},
+    {"role": "assistant", "content": "Charles Spencer will publish 'Swan Song: Diana, My Sister' about his sister, Princess Diana."},
+]
+
+
+async def test_the_conversation_is_offered_for_disambiguating_a_name():
+    """The model cannot qualify a name it was never shown the context for."""
+    llm = FakeLLM({"mode": "WEB", "intent": "ENTITY", "standalone_question": "q", "web_query": "q"})
+    await understand("Who is Charles Spencer?", history=DIANA_HISTORY, llm=llm)
+    assert "Diana" in llm.prompt
+    # and the instruction that a grammatical sentence can still need resolving
+    assert "self-contained" in llm.prompt
+
+
+async def test_an_entity_lookup_is_not_held_to_the_news_recency_window():
+    """reference=True is what drops the window in graph._web_days. Without it
+    the web leg searched the last 30 days for a biography and found none."""
+    llm = FakeLLM(
+        {"mode": "WEB", "intent": "ENTITY", "standalone_question": "Who is Charles Spencer, Diana's brother?",
+         "web_query": "Charles Spencer Earl Spencer Diana brother"}
+    )
+    result = await understand("Who is Charles Spencer?", history=DIANA_HISTORY, llm=llm)
+    assert result.intent == "ENTITY"
+    assert result.reference is True
+
+
+async def test_who_is_reads_as_background_without_a_model():
+    """The deterministic path has no intent to lean on, so the wording carries it."""
+    result = await understand("Who is Charles Spencer?", history=DIANA_HISTORY, llm=None)
+    assert result.reference is True
+
+
+async def test_a_dated_request_still_outranks_the_exemption():
+    """reference drops the window; an explicitly stated period must not be
+    dropped with it, or 'who was PM in March' would search all of time."""
+    llm = FakeLLM(
+        {"mode": "WEB", "intent": "ENTITY", "standalone_question": "Who is X?", "web_query": "X",
+         "from_date": "2026-03-01", "to_date": "2026-03-31"}
+    )
+    result = await understand("Who is X?", history=[], llm=llm)
+    assert result.reference is True
+    assert result.from_date == "2026-03-01"
+
+
+async def test_ordinary_news_is_still_held_to_the_window():
+    """The exemption must not leak into news questions, which need recency."""
+    llm = FakeLLM({"mode": "NEWS", "intent": "LATEST", "standalone_question": "latest on the budget", "news_query": "budget"})
+    result = await understand("what is the latest on the budget?", history=[], llm=llm)
+    assert result.reference is False

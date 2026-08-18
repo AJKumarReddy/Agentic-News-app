@@ -5,11 +5,24 @@ import SourceList from './SourceList';
 import VoiceIcon from './VoiceIcon';
 import type { ChatMessage, SpeechState } from '../types';
 
+// The tooltip: the fuller sentence, room for the detail the button face
+// cannot hold.
 const SPEECH_LABELS: Record<SpeechState, string> = {
   idle: 'Read this answer aloud',
   loading: 'Preparing audio…',
   speaking: 'Stop reading',
   error: 'Audio unavailable — try again',
+};
+
+// The button face. An equalizer glyph alone never said what the control did,
+// and a tooltip is not an answer on a touchscreen — so the name is written
+// out, and it is the accessible name too rather than a second wording that
+// speech control would fail to match.
+const SPEECH_ACTIONS: Record<SpeechState, string> = {
+  idle: 'Read aloud',
+  loading: 'Preparing…',
+  speaking: 'Stop reading',
+  error: 'Audio unavailable',
 };
 
 // memo: while streaming, only the last bubble's props change — earlier
@@ -69,9 +82,8 @@ function MessageBubble({
           <div className="mt-3 flex items-center gap-2">
             <button
               onClick={() => onSpeak(message.id as number)}
-              aria-label={SPEECH_LABELS[speechState]}
               title={SPEECH_LABELS[speechState]}
-              className={`inline-flex h-8 w-8 items-center justify-center rounded-lg border transition-colors ${
+              className={`inline-flex h-8 items-center gap-1.5 rounded-lg border px-2.5 text-[11px] font-medium transition-colors ${
                 speechState === 'speaking'
                   ? 'border-accent-300 bg-accent-50 text-accent-600 dark:border-accent-500/40 dark:bg-accent-500/15 dark:text-accent-300'
                   : speechState === 'error'
@@ -79,7 +91,8 @@ function MessageBubble({
                     : 'border-ink-200 text-ink-400 hover:border-accent-300 hover:text-accent-600 dark:border-ink-700 dark:text-ink-400 dark:hover:text-accent-300'
               }`}
             >
-              <VoiceIcon state={speechState} className="h-3.5 w-3.5" />
+              <VoiceIcon state={speechState} className="h-3.5 w-3.5 shrink-0" />
+              {SPEECH_ACTIONS[speechState]}
             </button>
             <span className="sr-only" role="status" aria-live="polite">
               {speechState === 'speaking' ? 'Reading the answer aloud' : ''}

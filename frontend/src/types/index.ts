@@ -116,7 +116,12 @@ export type ChatStreamEvent =
  *  the backend cannot serve. */
 export interface Capabilities {
   tts: boolean;
+  stt: boolean;
 }
 
 /** Playback state for one answer. */
 export type SpeechState = 'idle' | 'loading' | 'speaking' | 'error';
+
+/** Capture state for one spoken question. Mirrors SpeechState: the same four
+ *  shapes — resting, working, active, failed — read from the other end. */
+export type RecordingState = 'idle' | 'recording' | 'transcribing' | 'error';

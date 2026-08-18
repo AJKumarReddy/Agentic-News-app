@@ -69,6 +69,22 @@ class Settings(BaseSettings):
     # unreachable. The browser cache carries the long tail instead.
     tts_cache_ttl_seconds: int = 3600
 
+    # Speech-to-text for asking questions out loud. The mirror of the block
+    # above, and gated the same way: `stt_enabled` decides whether the feature
+    # exists, and nothing is ever recorded until the reader presses the button.
+    stt_enabled: bool = True
+    stt_model: str = "gpt-4o-mini-transcribe"
+    # Empty means auto-detect. Naming the language is both cheaper and more
+    # accurate when a deployment knows its audience speaks one.
+    stt_language: str = ""
+    # The recording is held in memory while it uploads, so this is the real
+    # ceiling on the endpoint, not the duration below. Roughly ten minutes of
+    # Opus; the browser stops well before it.
+    stt_max_bytes: int = 8_388_608
+    # The browser stops recording here. A forgotten open microphone would
+    # otherwise run until it hit the byte cap and came back as a 413.
+    stt_max_seconds: int = 60
+
     # Scheduled ingestion: keeps the index current without an external cron
     ingest_enabled: bool = True
     ingest_interval_minutes: int = 5

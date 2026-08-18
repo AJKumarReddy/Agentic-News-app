@@ -49,3 +49,6 @@ Thumbs.db
 # ── Misc ───────────────────────────────────────────────
 .cache/
 tmp/
+
+# ── Claude Code — local agent config & worktrees ───────
+.claude/
