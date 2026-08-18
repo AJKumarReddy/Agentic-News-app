@@ -211,6 +211,12 @@ export default function Sidebar({
           {voiceAvailable && <VoiceToggle voice={voice} onSelect={onSelectVoice} />}
         </div>
       </section>
+      <div className="space-y-1.5 border-t border-white/10 p-2">
+        <ThemeToggle theme={theme} onSelect={onSelectTheme} />
+        {/* only when the backend can actually serve it — a control that
+            cannot work is worse than no control */}
+        {voiceAvailable && <VoiceToggle voice={voice} onSelect={onSelectVoice} />}
+      </div>
 
       <div className="border-t border-white/10 px-5 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] text-[10px] leading-relaxed text-white/30">
         {sources.length > 0 ? (

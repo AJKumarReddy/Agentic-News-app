@@ -8,6 +8,11 @@ import VoiceIcon from './VoiceIcon';
 const OPTIONS: { value: VoicePref; label: string }[] = [
   { value: 'off', label: 'Always off' },
   { value: 'on', label: 'Always on' },
+import VoiceIcon from './VoiceIcon';
+
+const OPTIONS: { value: VoicePref; label: string }[] = [
+  { value: 'off', label: 'Off' },
+  { value: 'on', label: 'On' },
 ];
 
 /**
@@ -41,6 +46,16 @@ export default function VoiceToggle({
         role="radiogroup"
         aria-label="Read answers aloud"
         className="flex gap-1 rounded-md bg-white/[0.05] p-0.5"
+  return (
+    <div className="flex items-center gap-2">
+      <VoiceIcon
+        state={voice === 'on' ? 'speaking' : 'idle'}
+        className={`h-3.5 w-3.5 shrink-0 ${voice === 'on' ? 'text-accent-300' : 'text-white/30'}`}
+      />
+      <div
+        role="radiogroup"
+        aria-label="Read answers aloud"
+        className="flex flex-1 gap-1 rounded-md bg-white/[0.05] p-0.5"
       >
         {OPTIONS.map((option) => {
           const active = voice === option.value;
@@ -62,5 +77,6 @@ export default function VoiceToggle({
         })}
       </div>
     </SettingRow>
+    </div>
   );
 }

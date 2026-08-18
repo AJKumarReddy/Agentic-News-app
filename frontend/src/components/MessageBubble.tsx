@@ -84,6 +84,9 @@ function MessageBubble({
               onClick={() => onSpeak(message.id as number)}
               title={SPEECH_LABELS[speechState]}
               className={`inline-flex h-8 items-center gap-1.5 rounded-lg border px-2.5 text-[11px] font-medium transition-colors ${
+              aria-label={SPEECH_LABELS[speechState]}
+              title={SPEECH_LABELS[speechState]}
+              className={`inline-flex h-8 w-8 items-center justify-center rounded-lg border transition-colors ${
                 speechState === 'speaking'
                   ? 'border-accent-300 bg-accent-50 text-accent-600 dark:border-accent-500/40 dark:bg-accent-500/15 dark:text-accent-300'
                   : speechState === 'error'
@@ -93,6 +96,7 @@ function MessageBubble({
             >
               <VoiceIcon state={speechState} className="h-3.5 w-3.5 shrink-0" />
               {SPEECH_ACTIONS[speechState]}
+              <VoiceIcon state={speechState} className="h-3.5 w-3.5" />
             </button>
             <span className="sr-only" role="status" aria-live="polite">
               {speechState === 'speaking' ? 'Reading the answer aloud' : ''}
