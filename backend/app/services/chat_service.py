@@ -180,11 +180,15 @@ async def chat_once(
     answer = final.get("answer", "")
     sources = final.get("sources", [])
     conversation.state = _updated_state(conv_state, final)
-    await repo.add_message(conversation, "assistant", answer, sources)
+    message = await repo.add_message(conversation, "assistant", answer, sources)
     await session.commit()
     log_event(logger, "chat_complete", mode=final.get("mode"), total_latency=timer.ms)
     return {
         "conversation_id": conversation.id,
+        # Names the stored row so playback can ask for this answer's audio.
+        # The id is readable after the commit above because the session is
+        # built with expire_on_commit=False (see database/session.py).
+        "message_id": message.id,
         "answer": answer,
         "sources": sources,
         "mode": final.get("mode", ""),
@@ -282,9 +286,14 @@ async def chat_stream(
                 "headline": conversation.state.get("active_article_headline", ""),
             },
         )
-        await repo.add_message(conversation, "assistant", answer, final_state.get("sources", []))
+        message = await repo.add_message(
+            conversation, "assistant", answer, final_state.get("sources", [])
+        )
         await session.commit()
-        yield _sse("done", {})
+        # The id lands on `done` so playback can name this answer. Addressing
+        # by position in the client's array instead would speak the wrong
+        # message the moment the two lists drifted apart.
+        yield _sse("done", {"message_id": message.id})
     except Exception:
         logger.exception("chat_stream failed")
         yield _sse("error", {"detail": "The assistant hit an internal error. Please try again."})

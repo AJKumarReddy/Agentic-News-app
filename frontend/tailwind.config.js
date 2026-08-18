@@ -96,12 +96,19 @@ export default {
           '0%': { opacity: '0' },
           '100%': { opacity: '1' },
         },
+        // voice playback: bars scale from their own centre, so each rect needs
+        // transform-box: fill-box — set inline in VoiceIcon
+        equalize: {
+          '0%, 100%': { transform: 'scaleY(0.3)' },
+          '50%': { transform: 'scaleY(1)' },
+        },
       },
       animation: {
         'fade-up': 'fade-up 0.25s ease-out',
         shimmer: 'shimmer 1.4s linear infinite',
         'slide-in-left': 'slide-in-left 0.22s cubic-bezier(0.32, 0.72, 0, 1)',
         'fade-in': 'fade-in 0.2s ease-out',
+        equalize: 'equalize 0.85s ease-in-out infinite',
       },
     },
   },

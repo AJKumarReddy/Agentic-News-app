@@ -8,6 +8,8 @@ from app.core.security import (
     RateLimitMiddleware,
     SecurityHeadersMiddleware,
     TimeoutMiddleware,
+    is_audio,
+    is_expensive,
     sanitize_user_text,
 )
 
@@ -27,6 +29,10 @@ def make_app(**middleware) -> FastAPI:
     async def data():
         return {"ok": True}
 
+    @app.post("/api/audio/speech")
+    async def audio():
+        return {"ok": True}
+
     if "api_key" in middleware:
         app.add_middleware(ApiKeyMiddleware, api_key=middleware["api_key"])
     if "max_bytes" in middleware:
@@ -36,6 +42,7 @@ def make_app(**middleware) -> FastAPI:
             RateLimitMiddleware,
             limit_per_minute=middleware["rate"],
             chat_limit_per_minute=middleware.get("chat_rate", middleware["rate"]),
+            audio_limit_per_minute=middleware.get("audio_rate", middleware["rate"]),
         )
     if middleware.get("headers"):
         app.add_middleware(SecurityHeadersMiddleware)
@@ -84,6 +91,25 @@ async def test_rate_limit_enforced_and_chat_stricter():
         data_codes = [(await client.get("/api/data")).status_code for _ in range(3)]
     assert chat_codes == [200, 200, 429]  # chat budget = 2/min
     assert 429 not in data_codes  # general budget = 5/min not exhausted
+
+
+def test_audio_is_its_own_class_of_path():
+    assert is_audio("/api/audio/speech")
+    assert not is_audio("/api/chat")
+    # audio must NOT fall into the chat budget — see the next test for why
+    assert not is_expensive("/api/audio/speech")
+
+
+async def test_audio_has_its_own_budget_and_does_not_starve_chat():
+    """Autoplay makes every turn a chat request *and* an audio request. On a
+    shared bucket that halves usable chat throughput, and the 429 reads to the
+    user as a broken chat rather than as throttled audio."""
+    app = make_app(rate=10, chat_rate=3, audio_rate=1)
+    async with client_for(app) as client:
+        audio_codes = [(await client.post("/api/audio/speech")).status_code for _ in range(2)]
+        chat_codes = [(await client.post("/api/chat")).status_code for _ in range(3)]
+    assert audio_codes == [200, 429]  # audio budget = 1/min, exhausted
+    assert chat_codes == [200, 200, 200]  # chat budget untouched by it
 
 
 async def test_security_headers_present():

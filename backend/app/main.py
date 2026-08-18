@@ -5,7 +5,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.api import chat, health, news, rag
+from app.api import audio, chat, health, news, rag
 from app.core.config import get_settings
 from app.core.logging import Timer, configure_logging, log_event, new_request_id
 from app.core.security import (
@@ -56,6 +56,7 @@ def create_app() -> FastAPI:
         RateLimitMiddleware,
         limit_per_minute=settings.rate_limit_per_minute,
         chat_limit_per_minute=settings.chat_rate_limit_per_minute,
+        audio_limit_per_minute=settings.audio_rate_limit_per_minute,
     )
     app.add_middleware(ApiKeyMiddleware, api_key=settings.api_key)
     app.add_middleware(BodySizeLimitMiddleware, max_bytes=settings.max_body_bytes)
@@ -108,6 +109,7 @@ def create_app() -> FastAPI:
     app.include_router(chat.router, prefix="/api")
     app.include_router(news.router, prefix="/api")
     app.include_router(rag.router, prefix="/api")
+    app.include_router(audio.router, prefix="/api")
     return app
 
 
