@@ -58,6 +58,10 @@ export interface RouteDecision {
 }
 
 export interface ChatMessage {
+  /** Server-side id of the stored row. Absent while a turn is still
+   *  streaming, and it is what playback asks for — addressing by position in
+   *  this array would speak the wrong answer the moment the two lists drift. */
+  id?: number;
   role: 'user' | 'assistant';
   content: string;
   sources: Source[];
@@ -105,5 +109,14 @@ export type ChatStreamEvent =
   | { type: 'notice'; detail: string }
   | { type: 'route'; decision: RouteDecision }
   | { type: 'article'; article: ActiveArticle }
-  | { type: 'done' }
+  | { type: 'done'; message_id?: number }
   | { type: 'error'; detail: string };
+
+/** What this deployment can actually do, so the UI never renders a control
+ *  the backend cannot serve. */
+export interface Capabilities {
+  tts: boolean;
+}
+
+/** Playback state for one answer. */
+export type SpeechState = 'idle' | 'loading' | 'speaking' | 'error';

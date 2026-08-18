@@ -3,7 +3,9 @@ import { Link, NavLink, useLocation, useNavigate, useSearchParams } from 'react-
 import { SECTIONS, SECTION_GROUPS } from '../constants/sections';
 import Logo, { LogoMark } from './Logo';
 import ThemeToggle from './ThemeToggle';
+import VoiceToggle from './VoiceToggle';
 import type { Theme } from '../hooks/useTheme';
+import type { VoicePref } from '../hooks/useVoice';
 import { deleteAllConversations, deleteConversation, listConversations, listSources } from '../services/api';
 import type { ConversationSummary, NewsSourceInfo } from '../types';
 
@@ -11,10 +13,16 @@ export default function Sidebar({
   refreshKey,
   theme,
   onSelectTheme,
+  voice,
+  onSelectVoice,
+  voiceAvailable,
 }: {
   refreshKey?: number;
   theme: Theme;
   onSelectTheme: (theme: Theme) => void;
+  voice: VoicePref;
+  onSelectVoice: (voice: VoicePref) => void;
+  voiceAvailable: boolean;
 }) {
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [sources, setSources] = useState<NewsSourceInfo[]>([]);
@@ -189,8 +197,11 @@ export default function Sidebar({
         </div>
       </div>
 
-      <div className="border-t border-white/10 p-2">
+      <div className="space-y-1.5 border-t border-white/10 p-2">
         <ThemeToggle theme={theme} onSelect={onSelectTheme} />
+        {/* only when the backend can actually serve it — a control that
+            cannot work is worse than no control */}
+        {voiceAvailable && <VoiceToggle voice={voice} onSelect={onSelectVoice} />}
       </div>
 
       <div className="border-t border-white/10 px-5 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] text-[10px] leading-relaxed text-white/30">

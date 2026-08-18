@@ -50,6 +50,25 @@ class Settings(BaseSettings):
 
     max_agent_iterations: int = 6
 
+    # Text-to-speech for answer playback. Two independent gates govern this:
+    # `tts_enabled` decides whether the feature exists at all, and the reader's
+    # own preference (held in the browser, off by default) decides whether it
+    # ever speaks. Enabled here costs nothing until somebody opts in.
+    tts_enabled: bool = True
+    tts_model: str = "gpt-4o-mini-tts"
+    tts_voice: str = "alloy"
+    tts_format: str = "mp3"
+    # Delivery steering. Only the gpt-4o speech models accept this; it is
+    # dropped for the tts-1 family, which rejects the parameter.
+    tts_instructions: str = "Read as a news presenter: measured, neutral, unhurried."
+    tts_max_chars: int = 8000  # ceiling on one answer's audio spend
+    tts_chunk_chars: int = 3800  # under the API's per-request input cap
+    # Audio is three orders of magnitude larger than the JSON this cache
+    # otherwise holds, and Redis runs allkeys-lru — a long TTL would evict the
+    # article and search entries that keep the site up when a publisher is
+    # unreachable. The browser cache carries the long tail instead.
+    tts_cache_ttl_seconds: int = 3600
+
     # Scheduled ingestion: keeps the index current without an external cron
     ingest_enabled: bool = True
     ingest_interval_minutes: int = 5
@@ -61,6 +80,11 @@ class Settings(BaseSettings):
     # Security layer
     rate_limit_per_minute: int = 30
     chat_rate_limit_per_minute: int = 10
+    # Answer playback gets its own budget rather than sharing the chat one.
+    # With autoplay on, every turn is a chat request *and* an audio request —
+    # on a shared bucket that halves usable chat throughput, and the 429 reads
+    # to the user as the chat being broken rather than as voice being throttled.
+    audio_rate_limit_per_minute: int = 20
     api_key: str = ""  # optional X-API-Key gate; empty = disabled
     # Proxies between the client and this process, counted from the right of
     # X-Forwarded-For. 1 = a single ALB/nginx (the default deployment), 2 =

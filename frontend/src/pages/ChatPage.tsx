@@ -1,10 +1,14 @@
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { useLocation, useSearchParams } from 'react-router-dom';
 import ArticleChip from '../components/ArticleChip';
 import ChatInput from '../components/ChatInput';
 import MessageBubble from '../components/MessageBubble';
+import VoiceNudge from '../components/VoiceNudge';
 import { getConversation } from '../services/api';
 import { useChat } from '../hooks/useChat';
+import { useSpeech } from '../hooks/useSpeech';
+import type { useVoice } from '../hooks/useVoice';
+import type { SpeechState } from '../types';
 import { LogoMark } from '../components/Logo';
 
 // each prompt gets its own accent so the grid reads as a palette, not a block
@@ -19,7 +23,13 @@ const SUGGESTIONS = [
   },
 ];
 
-export default function ChatPage({ onConversationChange }: { onConversationChange?: () => void }) {
+export default function ChatPage({
+  onConversationChange,
+  voice,
+}: {
+  onConversationChange?: () => void;
+  voice: ReturnType<typeof useVoice>;
+}) {
   const {
     messages,
     setMessages,
@@ -33,6 +43,7 @@ export default function ChatPage({ onConversationChange }: { onConversationChang
     stop,
     reset,
   } = useChat();
+  const speech = useSpeech();
   const [searchParams] = useSearchParams();
   const location = useLocation();
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -58,7 +69,12 @@ export default function ChatPage({ onConversationChange }: { onConversationChang
         openedFromUrl.current = true;
         setConversationId(detail.id);
         setMessages(
-          detail.messages.map((m) => ({ role: m.role, content: m.content, sources: m.sources || [] })),
+          detail.messages.map((m) => ({
+            id: m.id,
+            role: m.role,
+            content: m.content,
+            sources: m.sources || [],
+          })),
         );
         // a reopened chat is still anchored to whatever it was anchored to
         const pinned = detail.state?.active_article_id;
@@ -96,7 +112,54 @@ export default function ChatPage({ onConversationChange }: { onConversationChang
     }
   }, [conversationId, onConversationChange]);
 
+  const { speak: speakAudio, stop: stopSpeech } = speech;
+  // Answers already played, or loaded from history and therefore never to be
+  // played unasked. Reopening a chat should be silent.
+  const spokenRef = useRef<Set<number>>(new Set());
+
+  useEffect(() => {
+    if (!requestedConversation) return;
+    messages.forEach((m) => m.id !== undefined && spokenRef.current.add(m.id));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [requestedConversation, messages.length]);
+
+  // Autoplay: the newest answer, once, only when the reader asked for it.
+  useEffect(() => {
+    if (voice.voice !== 'on' || !conversationId) return;
+    const last = messages[messages.length - 1];
+    if (!last || last.role !== 'assistant' || last.streaming || !last.content) return;
+    if (last.id === undefined || spokenRef.current.has(last.id)) return;
+    spokenRef.current.add(last.id);
+    speakAudio(conversationId, last.id);
+  }, [messages, voice.voice, conversationId, speakAudio]);
+
+  // A new question stops the previous answer talking over it.
+  const handleSend = useCallback(
+    (text: string, articleId?: string | null) => {
+      stopSpeech();
+      return send(text, articleId);
+    },
+    [send, stopSpeech],
+  );
+
+  const handleSpeak = useCallback(
+    (messageId: number) => {
+      if (conversationId) speakAudio(conversationId, messageId);
+    },
+    [conversationId, speakAudio],
+  );
+
+  const speechStateFor = (id?: number): SpeechState => {
+    if (id === undefined) return 'idle';
+    if (speech.speakingId === id) return 'speaking';
+    if (speech.loadingId === id) return 'loading';
+    if (speech.errorId === id) return 'error';
+    return 'idle';
+  };
+
   const empty = messages.length === 0;
+  const hasAnswer = messages.some((m) => m.role === 'assistant' && !m.streaming && m.content);
+  const showNudge = voice.available && !voice.nudged && hasAnswer;
 
   return (
     <div className="flex h-full flex-col bg-brand-soft dark:bg-brand-soft-dark">
@@ -137,7 +200,12 @@ export default function ChatPage({ onConversationChange }: { onConversationChang
           ) : (
             <div className="space-y-5">
               {messages.map((message, index) => (
-                <MessageBubble key={index} message={message} />
+                <MessageBubble
+                  key={index}
+                  message={message}
+                  speechState={speechStateFor(message.id)}
+                  onSpeak={voice.available ? handleSpeak : undefined}
+                />
               ))}
               <div ref={bottomRef} />
             </div>
@@ -149,8 +217,11 @@ export default function ChatPage({ onConversationChange }: { onConversationChang
           over the composer once viewport-fit=cover extends the page under it */}
       <div className="shrink-0 border-t border-ink-200 dark:border-ink-700 bg-white/80 dark:bg-ink-900/80 backdrop-blur">
         <div className="mx-auto max-w-3xl px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 sm:px-4 sm:pb-4 sm:pt-4">
+          {showNudge && (
+            <VoiceNudge onEnable={() => voice.setVoice('on')} onDismiss={voice.dismissNudge} />
+          )}
           {activeArticle && <ArticleChip article={activeArticle} onClear={clearArticle} />}
-          <ChatInput onSend={send} busy={busy} onStop={stop} />
+          <ChatInput onSend={handleSend} busy={busy} onStop={stop} />
           <p className="mt-2 text-center text-[11px] leading-tight text-ink-400 dark:text-ink-500 sm:mt-2.5">
             Every claim is cited.{' '}
             <span className="hidden sm:inline">Verify important facts through the linked articles.</span>

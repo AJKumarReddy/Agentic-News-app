@@ -1,6 +1,20 @@
 import { describe, expect, it } from 'vitest';
 import { SSEParser } from './sse';
 
+describe('done event', () => {
+  it('carries the stored message id so playback can name the answer', () => {
+    const parser = new SSEParser();
+    const events = parser.feed('event: done\ndata: {"message_id": 42}\n\n');
+    expect(events).toEqual([{ type: 'done', message_id: 42 }]);
+  });
+
+  it('survives a done with no id', () => {
+    const parser = new SSEParser();
+    const events = parser.feed('event: done\ndata: {}\n\n');
+    expect(events).toEqual([{ type: 'done', message_id: undefined }]);
+  });
+});
+
 describe('SSEParser', () => {
   it('parses a complete event', () => {
     const parser = new SSEParser();
