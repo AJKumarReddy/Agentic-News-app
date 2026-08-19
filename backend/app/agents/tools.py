@@ -117,6 +117,32 @@ async def index_guardian_articles(
     return asdict(await ingest_articles(session, articles))
 
 
+def cap_chunks_per_article(
+    chunks: list[ScoredChunk], max_per_article: int
+) -> list[ScoredChunk]:
+    """Limit how many chunks one article may contribute, keeping rank order.
+
+    A live blog or a daily round-up is a single article covering a dozen
+    unrelated stories. A broad question matches chunk after chunk of it, so it
+    filled the candidate pool, survived reranking, and every claim in the
+    answer cited that one piece — an answer about seven stories with one
+    source, whose headline named only the first of them. Relevance still
+    orders what is kept; the cap only stops one article from being the whole
+    answer.
+    """
+    if max_per_article <= 0:
+        return chunks
+    counts: dict[str, int] = {}
+    kept: list[ScoredChunk] = []
+    for scored in chunks:
+        article_id = getattr(scored.chunk, "article_id", "") or ""
+        if counts.get(article_id, 0) >= max_per_article:
+            continue
+        counts[article_id] = counts.get(article_id, 0) + 1
+        kept.append(scored)
+    return kept
+
+
 def ensure_source_diversity(
     selected: list[ScoredChunk], candidates: list[ScoredChunk], reserved: int = 1
 ) -> list[ScoredChunk]:
@@ -161,11 +187,28 @@ async def retrieve_rag(
     freshness: bool = False,
     rerank: bool = True,
     diversify: bool = True,
+    max_per_article: int | None = None,
+    final_top_k: int | None = None,
 ) -> list[ScoredChunk]:
-    """Hybrid retrieval over indexed chunks from all publishers, reranked."""
+    """Hybrid retrieval over indexed chunks from all publishers, reranked.
+
+    `max_per_article` and `final_top_k` let a caller trade depth for breadth.
+    A round-up question ("top news today") wants one passage from each of many
+    articles, so every story it lists can carry its own citation; a question
+    about one development wants several passages from the few articles that
+    cover it.
+    """
     settings = get_settings()
     pool = top_k or settings.rag_initial_top_k
     source_ids = [s.id for s in enabled_sources()]
+    per_article = (
+        settings.rag_max_chunks_per_article if max_per_article is None else max_per_article
+    )
+    keep = final_top_k or settings.rag_final_top_k
+    # Read wider than the pool, because capping per article throws chunks away:
+    # without the headroom a dominant article leaves the reranker fewer
+    # candidates than it had before, rather than more articles.
+    overfetch = max(1, settings.rag_candidate_overfetch)
 
     if diversify and len(source_ids) > 1 and not (filters and filters.source_ids):
         # Retrieve per publisher, then rank together. A shared pool is unfair
@@ -177,19 +220,35 @@ async def retrieve_rag(
             scoped = replace(filters or RetrievalFilters(), source_ids=[source_id])
             groups.append(
                 await hybrid_retrieve(
-                    session, query, filters=scoped, top_k=per_source, freshness=freshness
+                    session,
+                    query,
+                    filters=scoped,
+                    top_k=per_source * overfetch,
+                    freshness=freshness,
                 )
             )
-        candidates = [chunk for group in groups for chunk in group]
+        # Cap within each publisher before merging, so one publisher's live
+        # blog cannot spend the other publisher's headroom.
+        candidates = [
+            chunk
+            for group in groups
+            for chunk in cap_chunks_per_article(group, per_article)[:per_source]
+        ]
         candidates.sort(key=lambda s: s.score, reverse=True)
     else:
-        candidates = await hybrid_retrieve(
-            session, query, filters=filters, top_k=pool, freshness=freshness
-        )
+        candidates = cap_chunks_per_article(
+            await hybrid_retrieve(
+                session, query, filters=filters, top_k=pool * overfetch, freshness=freshness
+            ),
+            per_article,
+        )[:pool]
     if rerank and candidates:
-        selected = await rerank_chunks(query, candidates, settings.rag_final_top_k)
+        selected = await rerank_chunks(query, candidates, keep)
     else:
-        selected = candidates[: settings.rag_final_top_k]
+        selected = candidates[:keep]
+    # The reranker chooses freely from the candidates, so the cap is reapplied
+    # to what it returned rather than trusted to survive it.
+    selected = cap_chunks_per_article(selected, per_article)
     return ensure_source_diversity(selected, candidates) if diversify else selected
 
 

@@ -38,6 +38,27 @@ class Settings(BaseSettings):
 
     rag_initial_top_k: int = 20
     rag_final_top_k: int = 6
+    # Most chunks any single article may contribute to one answer. A live blog
+    # or a daily round-up is one article covering a dozen unrelated stories, so
+    # a broad question ("top US news today") matches its chunks over and over
+    # and every claim ends up citing that one piece. Capping the contribution
+    # is what makes a multi-story answer cite multiple articles.
+    rag_max_chunks_per_article: int = 2
+    # How much wider than the candidate pool to read from the database before
+    # the cap is applied. The cap discards chunks, so without headroom a
+    # dominant article shrinks the pool instead of sharing it. Costs one wider
+    # SQL read — no extra embedding or LLM call, since the pool is trimmed
+    # before reranking.
+    rag_candidate_overfetch: int = 3
+    # Round-up questions ("top US news today") are answered from many articles
+    # rather than many passages: one chunk each, so every story listed carries
+    # its own citation pointing at the article that reported it. Depth is the
+    # wrong shape here — a reader wants seven stories and seven links, not
+    # seven paragraphs of one live blog.
+    rag_roundup_top_k: int = 10
+    # Round-up evidence is trimmed to each article's opening, so that many
+    # articles fit the evidence budget instead of four full-text chunks.
+    rag_roundup_chunk_chars: int = 1200
     # Guardian editorial desk to favour in ranking: US | UK | AUS | "" (none).
     # This is a ranking preference, not a filter — other editions still surface
     # when they are the better match.

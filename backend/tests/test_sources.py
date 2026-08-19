@@ -376,6 +376,65 @@ def test_diversity_never_empties_the_dominant_source():
     assert ensure_source_diversity(selected, candidates) == selected
 
 
+# ── per-article cap in retrieval ───────────────────────────────────
+
+def chunk_of(article_id: str, chunk_id: int, score: float, source_id: str = "guardian"):
+    from types import SimpleNamespace
+
+    from app.rag.vector_store import ScoredChunk
+
+    return ScoredChunk(
+        chunk=SimpleNamespace(id=chunk_id, article_id=article_id, source_id=source_id),
+        score=score,
+    )
+
+
+def test_cap_stops_one_live_blog_owning_the_answer():
+    from app.agents.tools import cap_chunks_per_article
+
+    # a live blog matches a broad question over and over; without the cap all
+    # six final chunks are the same article and every claim cites it once
+    liveblog = [chunk_of("g/liveblog", i, 1.0 - i / 100) for i in range(6)]
+    others = [chunk_of(f"g/story{i}", 100 + i, 0.5 - i / 100) for i in range(3)]
+    result = cap_chunks_per_article(liveblog + others, 2)
+    assert [c.chunk.article_id for c in result].count("g/liveblog") == 2
+    assert len({c.chunk.article_id for c in result}) == 4
+
+
+def test_cap_keeps_the_highest_ranked_chunks_of_a_capped_article():
+    from app.agents.tools import cap_chunks_per_article
+
+    chunks = [chunk_of("g/a", i, 1.0 - i / 10) for i in range(4)]
+    result = cap_chunks_per_article(chunks, 2)
+    assert [c.chunk.id for c in result] == [0, 1]  # relevance still leads
+
+
+def test_cap_is_a_noop_when_articles_already_differ():
+    from app.agents.tools import cap_chunks_per_article
+
+    chunks = [chunk_of(f"g/{i}", i, 1.0 - i / 10) for i in range(5)]
+    assert cap_chunks_per_article(chunks, 2) == chunks
+
+
+def test_cap_disabled_returns_everything():
+    from app.agents.tools import cap_chunks_per_article
+
+    chunks = [chunk_of("g/a", i, 1.0) for i in range(5)]
+    assert cap_chunks_per_article(chunks, 0) == chunks
+
+
+def test_cap_counts_articles_not_publishers():
+    from app.agents.tools import cap_chunks_per_article
+
+    # one article per publisher, three chunks each — both are capped
+    chunks = [chunk_of("g/a", i, 1.0, "guardian") for i in range(3)] + [
+        chunk_of("n/a", 10 + i, 0.9, "nyt") for i in range(3)
+    ]
+    result = cap_chunks_per_article(chunks, 2)
+    assert len(result) == 4
+    assert [c.chunk.source_id for c in result].count("nyt") == 2
+
+
 # ── pagination across publishers ───────────────────────────────────
 
 class StubSource:

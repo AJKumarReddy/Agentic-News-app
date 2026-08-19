@@ -61,6 +61,8 @@ flowchart TB
 | Scope | **Deterministic guardrail** | Task requests (write code, solve maths, ghostwrite, roleplay) are declined by regex in `agents/scope.py` before any search or model call — a guardrail that asks the model to police itself fails exactly when the model misreads the request. News *about* those subjects is unaffected. |
 | Query resolution | **Resolve before searching** | Follow-ups ("search youtube for related news", "now do a google search") are rewritten against the conversation *first*. Searching the raw words was the single largest source of wrong answers. |
 | Multi-source | **Adapter per publisher** | Every source returns the same `NormalizedArticle`, so retrieval, chunking, citations and the UI are source-agnostic. Adding a newsroom is one adapter. |
+| Per-article cap | **No article owns an answer** | Diversity across *publishers* was enforced; diversity across *articles* was not. One Guardian live blog could supply every final chunk, so a seven-story answer cited it seven times and each item linked to a headline about a different story. Each article now contributes at most `RAG_MAX_CHUNKS_PER_ARTICLE` chunks. |
+| Round-ups | **Breadth, not depth** | "Top US news today" is a different retrieval problem from "what did the report say". A round-up (`LATEST`/`SUMMARY`/`TREND`, or any freshness question) retrieves *one* passage from each of ~10 articles rather than several from a few, and trims each to the article's opening so they all fit the evidence budget. That is what gives each listed story its own citation number pointing at the article that reported it. |
 | Fair ranking | **Per-source retrieval** | Publishers expose wildly different text lengths (NYT gives abstracts only). A shared candidate pool silently excluded NYT entirely, so retrieval runs per source and merges. |
 | Web fallback | **Tavily, gated** | Results exclude our own publishers' domains, must pass relevance/recency/low-signal-domain gates, and are cited separately. Disabled entirely without `TAVILY_API_KEY`. |
 | Edition | **US desk preferred** | Guardian `productionOffice` is stored per article and nudges ranking. A nudge, not a filter — a better UK/AUS match still wins. |
@@ -145,6 +147,8 @@ Full list in [.env.example](.env.example). The ones that matter:
 | `VITE_API_BASE_URL` | build-time arg for the frontend image; `/api` when one ALB serves both services |
 | `PREFERRED_PRODUCTION_OFFICE` · `EDITION_BOOST` | Guardian desk to favour (default `US`) |
 | `RAG_INITIAL_TOP_K` · `RAG_FINAL_TOP_K` | retrieval funnel (20 → 6) |
+| `RAG_MAX_CHUNKS_PER_ARTICLE` · `RAG_CANDIDATE_OVERFETCH` | most chunks one article may contribute to an answer (2), and how much wider the database is read to refill the pool after that cap (3×) |
+| `RAG_ROUNDUP_TOP_K` · `RAG_ROUNDUP_CHUNK_CHARS` | round-up questions retrieve one passage from each of this many articles (10), trimmed to this many characters (1200) so they all fit the evidence budget |
 | `RERANKER` | `llm` (default) · `cohere` · `none` |
 | `FRONTEND_URL` · `EXTRA_CORS_ORIGINS` | CORS allowlist — never `*` in production |
 | `API_KEY` · `VITE_API_KEY` | optional `X-API-Key` gate for private deployments |
@@ -195,6 +199,8 @@ publisher APIs → normalize → dedup (id + content hash) → chunk (~800 tok, 
 
 - **Date handling** is deterministic ("this week", "last 3 months" → exact ranges), not left to the model.
 - **Narrow windows widen rather than fail.** A "today" query early in the publishing day matches nothing; retrieval relaxes to 14 days, then to everything, and the UI shows a *"Results from Last 14 days"* badge — the answer itself never editorialises about the search window.
+- **A round-up cites a story per number.** `[1] [2] [3]` in a list of the day's news must each open the article that reported *that* item. Round-up questions therefore retrieve one passage from each of many articles; focused questions still retrieve several passages from the few that cover the development.
+- **No article may be the whole answer.** A live blog or a daily round-up is one article covering a dozen unrelated stories, so a broad question matches its chunks over and over. Retrieval caps each article's contribution (default 2 chunks) and reads wider to refill the pool, at every stage — per publisher, and again on what the reranker returns. Uncapped, "top US news today" returned seven stories citing a single Florida-primaries live blog.
 - **Incremental only.** The whole index is never rebuilt; an article is embedded once and re-embedded only if its content hash or the embedding model changes.
 
 ### 3. Citation integrity

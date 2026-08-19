@@ -60,7 +60,14 @@ CITATION_POLICY = {
 
 INTENT_GUIDANCE = {
     "QA": "Answer the question directly and concisely.",
-    "LATEST": "Lead with the newest developments, each with its date. Prioritise recency over depth.",
+    "LATEST": (
+        "Lead with the newest developments, each with its date. Prioritise recency over depth. "
+        "Each development is a separate story from a separate article: give every one the "
+        "citation of the article it came from, not a single number repeated down the list. "
+        "Where one article is a live blog or round-up covering several of the developments, "
+        "cite it for each one you take from it, and do not present its headline as if it "
+        "described them all."
+    ),
     "SUMMARY": "Summarise the coverage: main themes, key developments, notable analysis.",
     "COMPARISON": "Compare the subjects side by side — a short section each, then the differences.",
     "TIMELINE": "Build a chronological timeline. Format entries as '**YYYY-MM-DD** — event [n]', oldest first.",
