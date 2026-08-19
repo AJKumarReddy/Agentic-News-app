@@ -5,7 +5,8 @@ import type { Source } from '../types';
 
 /**
  * Renders assistant markdown and converts [n] citation markers into
- * clickable badges linking to the numbered Guardian source.
+ * clickable badges linking to the numbered source — each one opens the
+ * article it cites, whichever publisher it came from.
  */
 export default function Markdown({ content, sources }: { content: string; sources: Source[] }) {
   const bySourceNumber = useMemo(() => new Map(sources.map((s) => [s.n, s])), [sources]);
@@ -25,7 +26,12 @@ export default function Markdown({ content, sources }: { content: string; source
               target="_blank"
               rel="noopener noreferrer"
               className={isWeb ? 'citation-badge-web' : 'citation-badge'}
-              title={`${isWeb ? source.source || 'Web' : 'The Guardian'}: ${source.headline}`}
+              // Names the article this number actually points at. It used to
+              // read "The Guardian" for every publisher citation, hard-coded —
+              // so an NYT citation announced the wrong newsroom, and a reader
+              // checking where a claim came from was told the publisher rather
+              // than the piece.
+              title={`${source.source || (isWeb ? 'Web' : 'Publisher')}: ${source.headline}`}
             >
               {match[1]}
             </a>

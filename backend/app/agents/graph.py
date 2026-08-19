@@ -73,8 +73,16 @@ def _publisher_source(chunk) -> dict:
     }
 
 
-def _chunks_to_evidence(groups: dict[str, list[ScoredChunk]]) -> tuple[list[dict], list[dict]]:
-    """Number sources per unique article; chunks from one article share a number."""
+def _chunks_to_evidence(
+    groups: dict[str, list[ScoredChunk]], max_chars: int | None = None
+) -> tuple[list[dict], list[dict]]:
+    """Number sources per unique article; chunks from one article share a number.
+
+    `max_chars` trims each passage. The evidence budget is shared, and `_fill`
+    stops at the first entry that will not fit — so a handful of full-text
+    chunks crowds out every article behind them. A round-up needs the opening
+    of ten articles far more than it needs ten paragraphs of four.
+    """
     sources: list[dict] = []
     index: dict[str, int] = {}
     evidence: list[dict] = []
@@ -92,7 +100,7 @@ def _chunks_to_evidence(groups: dict[str, list[ScoredChunk]]) -> tuple[list[dict
                     "group": group_name,
                     "headline": chunk.headline,
                     "published_at": chunk.published_at.isoformat() if chunk.published_at else "",
-                    "text": chunk.text,
+                    "text": chunk.text[:max_chars] if max_chars else chunk.text,
                 }
             )
     return evidence, sources
@@ -208,6 +216,16 @@ def _history_messages(history: list[dict]) -> list[Any]:
         role = turn.get("role")
         messages.append(AIMessage(content=content) if role == "assistant" else HumanMessage(content=content))
     return messages
+
+
+#: Intents that want many articles rather than many passages.
+ROUNDUP_INTENTS = {"LATEST", "SUMMARY", "TREND"}
+
+
+def _is_roundup(state: AgentState) -> bool:
+    """Is this a "what's happening" question rather than a question about one
+    development? Those want a story per citation."""
+    return state.get("intent", "QA") in ROUNDUP_INTENTS or bool(state.get("freshness"))
 
 
 def _window_label(state: AgentState) -> str:
@@ -404,9 +422,22 @@ def build_agent_graph(session: AsyncSession, understanding_llm=None, synthesis_l
             topic = ", ".join(state.get("entities", []) or state.get("topics", [])) or question
             groups = {"default": await tools.build_timeline(session, topic, filters=filters)}
         else:
+            # A round-up asks "what happened", not "what happened in this
+            # story". Answering it from several passages of a few articles
+            # produced one citation repeated down the list — and because a
+            # live blog covers a dozen unrelated stories, that one citation
+            # was a headline about none of them. Breadth instead: one passage
+            # from each of many articles, so every item gets its own number
+            # and its own link.
+            roundup = _is_roundup(state)
             groups = {
                 "default": await tools.retrieve_rag(
-                    session, question, filters=filters, freshness=state.get("freshness", False)
+                    session,
+                    question,
+                    filters=filters,
+                    freshness=state.get("freshness", False),
+                    max_per_article=1 if roundup else None,
+                    final_top_k=settings.rag_roundup_top_k if roundup else None,
                 )
             }
 
@@ -440,7 +471,16 @@ def build_agent_graph(session: AsyncSession, understanding_llm=None, synthesis_l
                     ("all sections", replace(filters, from_date=None, to_date=None, sections=[]))
                 )
             for label, wider in ladder:
-                fallback = await tools.retrieve_rag(session, question, filters=wider, freshness=True)
+                # The widened attempt keeps the shape of the original: a
+                # round-up that had to look further back is still a round-up.
+                fallback = await tools.retrieve_rag(
+                    session,
+                    question,
+                    filters=wider,
+                    freshness=True,
+                    max_per_article=1 if _is_roundup(state) else None,
+                    final_top_k=settings.rag_roundup_top_k if _is_roundup(state) else None,
+                )
                 if fallback:
                     groups = {"default": fallback}
                     widened = True
@@ -454,7 +494,9 @@ def build_agent_graph(session: AsyncSession, understanding_llm=None, synthesis_l
                 if state.get("date_explicit"):
                     notice = f"No newsroom coverage {_window_label(state)}"
 
-        evidence, sources = _chunks_to_evidence(groups)
+        evidence, sources = _chunks_to_evidence(
+            groups, max_chars=settings.rag_roundup_chunk_chars if _is_roundup(state) else None
+        )
         log_event(
             logger,
             "news_evidence",
