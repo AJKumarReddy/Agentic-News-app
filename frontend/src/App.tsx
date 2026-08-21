@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Route, Routes } from 'react-router-dom';
+import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import Sidebar from './components/Sidebar';
 import { useCapabilities } from './hooks/useCapabilities';
 import { useTheme } from './hooks/useTheme';
@@ -7,6 +7,19 @@ import { useVoice } from './hooks/useVoice';
 import ArticlePage from './pages/ArticlePage';
 import ChatPage from './pages/ChatPage';
 import SearchPage from './pages/SearchPage';
+
+/** The site root used to be the chat; it now opens the news.
+ *
+ *  Chat links minted before the move carry `/?conversation=<id>` and may be
+ *  bookmarked, so the conversation is forwarded to its new home rather than
+ *  dropped on the floor. `replace` keeps the redirect out of the history —
+ *  without it the back button bounces between `/` and `/search`.
+ */
+export function RootRedirect() {
+  const { search } = useLocation();
+  const conversation = new URLSearchParams(search).get('conversation');
+  return <Navigate to={conversation ? `/chat${search}` : '/search'} replace />;
+}
 
 export default function App() {
   const [sidebarRefresh, setSidebarRefresh] = useState(0);
@@ -31,8 +44,10 @@ export default function App() {
       />
       <main className="min-h-0 min-w-0 flex-1">
         <Routes>
+          <Route path="/" element={<RootRedirect />} />
+          <Route path="/search" element={<SearchPage />} />
           <Route
-            path="/"
+            path="/chat"
             element={
               <ChatPage
                 onConversationChange={() => setSidebarRefresh((n) => n + 1)}
@@ -41,7 +56,6 @@ export default function App() {
               />
             }
           />
-          <Route path="/search" element={<SearchPage />} />
           {/* Guardian article IDs contain slashes → splat route */}
           <Route path="/article/*" element={<ArticlePage />} />
         </Routes>

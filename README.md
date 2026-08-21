@@ -1,11 +1,11 @@
 # News AI
 
-A production-ready AI news research assistant. It searches live reporting from **The Guardian** and **The New York Times**, indexes it into a vector store, and answers natural-language questions with **grounded, citation-backed answers** — summaries, comparisons, timelines and follow-ups — falling back to the open web only when the newsrooms can't answer.
+A production-ready AI news research assistant. It searches live reporting from **The Guardian**, **The New York Times** and **TheNewsAPI** (an aggregator over thousands of outlets), indexes it into a vector store, and answers natural-language questions with **grounded, citation-backed answers** — summaries, comparisons, timelines and follow-ups — falling back to the open web only when the newsrooms can't answer.
 
 **Repository:** https://github.com/AJKumarReddy/Agentic-News-app
 
 ```
-React + TypeScript + Vite + Tailwind  →  FastAPI + LangGraph + pgvector  →  Guardian · NYT · Tavily · OpenAI
+React + TypeScript + Vite + Tailwind  →  FastAPI + LangGraph + pgvector  →  Guardian · NYT · TheNewsAPI · Tavily · OpenAI
 ```
 
 ---
@@ -39,6 +39,7 @@ flowchart TB
     UN --> SRC[Sources]
     SRC --> G[Guardian Content API]
     SRC --> NY[NY Times API]
+    SRC --> TNA[TheNewsAPI<br/>aggregator · daily budget]
     UN --> WEB[Tavily web search<br/>gated · cited separately]
 
     SRC --> RAG[RAG Engine]
@@ -78,7 +79,7 @@ flowchart TB
 ├── frontend/               React + TS + Vite + Tailwind
 │   └── src/
 │       ├── components/     Sidebar, chat, cards, citations, theme toggle
-│       ├── pages/          Chat · Search · Article intelligence
+│       ├── pages/          Search (the landing page) · Chat · Article intelligence
 │       ├── hooks/          useChat (SSE), useTheme
 │       ├── services/       API client
 │       └── constants/      section taxonomy
@@ -86,7 +87,7 @@ flowchart TB
 │   ├── app/
 │   │   ├── api/            chat · news · rag · health routers
 │   │   ├── agents/         graph, understand (resolve+route), dateparse, tools
-│   │   ├── sources/        NewsSource abstraction · Guardian · NYT · registry
+│   │   ├── sources/        NewsSource abstraction · Guardian · NYT · TheNewsAPI · quota · registry
 │   │   ├── guardian/       Guardian client, normalizer, shared models
 │   │   ├── websearch/      Tavily client + quality gates
 │   │   ├── rag/            chunker · embeddings · vector store · retrieval · reranker · ingestion
@@ -95,7 +96,7 @@ flowchart TB
 │   │   ├── services/       chat orchestration/SSE, search, article intelligence, cache
 │   │   ├── tasks/          scheduler, ingest_recent, edition backfill
 │   │   └── core/           config, JSON logging, security middleware
-│   ├── tests/              119 tests
+│   ├── tests/              377 tests
 │   └── evaluation/         20-question RAG evaluation harness
 ├── aws/                    ECS Fargate task definitions + production deployment guide
 ├── scripts/                health-check.sh · guardian_api_smoke.py
@@ -106,7 +107,7 @@ flowchart TB
 
 ## Quick start (local)
 
-Prerequisites: Docker Desktop, plus API keys — [Guardian](https://open-platform.theguardian.com/access/) (free), [OpenAI](https://platform.openai.com/), optionally [NYT](https://developer.nytimes.com/) and [Tavily](https://tavily.com) (both free tiers).
+Prerequisites: Docker Desktop, plus API keys — [Guardian](https://open-platform.theguardian.com/access/) (free), [OpenAI](https://platform.openai.com/), optionally [NYT](https://developer.nytimes.com/), [TheNewsAPI](https://www.thenewsapi.com/account/dashboard) and [Tavily](https://tavily.com) (all free tiers).
 
 ```bash
 git clone https://github.com/AJKumarReddy/Agentic-News-app.git
@@ -137,8 +138,9 @@ Full list in [.env.example](.env.example). The ones that matter:
 
 | Variable | Purpose |
 |---|---|
-| `GUARDIAN_API_KEY` · `NYT_API_KEY` | publishers; a source with no key is skipped, so the app runs on whichever keys exist |
-| `ENABLED_SOURCES` | active publishers in priority order (`guardian,nyt`) |
+| `GUARDIAN_API_KEY` · `NYT_API_KEY` · `THENEWSAPI_API_KEY` | publishers; a source with no key is skipped, so the app runs on whichever keys exist |
+| `ENABLED_SOURCES` | active publishers in priority order (`guardian,nyt,thenewsapi`) |
+| `THENEWSAPI_PAGE_SIZE` · `THENEWSAPI_DAILY_BUDGET` · `THENEWSAPI_INTERACTIVE_RESERVE` | free-tier limits (3 per request, 100 per day) and the slice held back for interactive search |
 | `OPENAI_API_KEY` · `CHAT_MODEL` · `EMBEDDING_MODEL` | generation and embeddings |
 | `TAVILY_API_KEY` | optional web fallback; empty = newsroom-only, no web request ever made |
 | `WEB_SEARCH_THRESHOLD` | newsroom sources at or below this count trigger a web top-up |
@@ -157,7 +159,7 @@ Full list in [.env.example](.env.example). The ones that matter:
 | `ADMIN_API_KEY` | unlocks the operator endpoints (`/api/rag/*`, `/api/intent`) via `X-Admin-Key`. Unset, they are **closed in production** and open in development. Never put this in the SPA bundle |
 
 Locally these come from `.env`. **In production nothing is read from a file** — the ECS task
-definition lists plain values inline and pulls every secret (`GUARDIAN_API_KEY`, `NYT_API_KEY`,
+definition lists plain values inline and pulls every secret (`GUARDIAN_API_KEY`, `NYT_API_KEY`, `THENEWSAPI_API_KEY`,
 `TAVILY_API_KEY`, `OPENAI_API_KEY`, `DATABASE_URL`, `REDIS_URL`) from **SSM Parameter Store** by
 ARN, injected as environment variables at task start. The application code is identical either
 way; only the source of the values changes.
@@ -232,6 +234,7 @@ Answers can be read aloud through the OpenAI speech API. Two independent gates g
 |---|---|---|
 | **The Guardian** | Full article bodies, all sections, deep archive | The richest evidence; `productionOffice` enables US-desk preference |
 | **The New York Times** | Headlines, abstracts and lead paragraphs | The API exposes **no article bodies** — evidence is short by design |
+| **TheNewsAPI** | Thousands of outlets, US-weighted | An aggregator, not a masthead. Descriptions and snippets only; each article is cited under **its own publisher** |
 | **Tavily (web)** | Everything else | Supplementary only, gated and cited separately |
 
 **NYT specifics worth knowing:**
@@ -241,7 +244,16 @@ Answers can be read aloud through the OpenAI speech API. Two independent gates g
 - Rate limits are tight (~5 req/min, 500/day); requests are throttled and responses cached.
 - Its `multimedia` field has shipped as a list of objects, a list of strings and a dict — all three are handled.
 
-Because NYT chunks are an order of magnitude shorter than full-text ones, **retrieval runs per source and merges**, and a diversity pass guarantees each publisher a foothold. Without it, answers silently became single-source.
+**TheNewsAPI specifics worth knowing:**
+
+- It relays other newsrooms, so `source` carries the **publisher that actually reported the story** ("cnn.com", "salon.com") while `source_id` stays `thenewsapi`. Citing the aggregator would misattribute every article.
+- The free plan is **100 requests/day and 3 articles per request**, against a scheduler that ticks every five minutes. A daily counter in Redis is shared across workers, and background ingestion is cut off at `THENEWSAPI_DAILY_BUDGET - THENEWSAPI_INTERACTIVE_RESERVE` so it can never drain the quota a reader's search needs. Running out degrades to stored articles, exactly like an unreachable publisher.
+- `/api/health` reports it from the budget rather than by calling the API — a real probe on a 60-second cache would spend ~1,400 requests/day against a budget of 100 and take the source down by itself.
+- Articles arrive tagged `["general", "politics"]` and similar; the category asked for wins, then anything more specific than the catch-all, so a section browse files its results where the section filter will find them.
+- Its ten categories are mapped into the app's Guardian-flavoured section vocabulary on the way in ("tech" is stored as "Technology").
+- Because it aggregates hundreds of image CDNs, the frontend CSP allows `img-src https:`. See the comment in `frontend/nginx.conf`.
+
+Because NYT and TheNewsAPI chunks are an order of magnitude shorter than full-text ones, **retrieval runs per source and merges**, and a diversity pass guarantees each publisher a foothold. Without it, answers silently became single-source.
 
 ## Scheduled ingestion
 
@@ -308,7 +320,7 @@ cd backend && pytest -q     # 319 tests
 cd frontend && npm test     # 38 tests
 ```
 
-Covers the Guardian and NYT adapters (mocked HTTP), chunking, dedup, RRF fusion, edition boost, source diversity, reranking, routing and resolution, date parsing and filtering, scope refusals, the scheduler's lock, security middleware, speech text preparation and playback ownership, API contracts, the SSE parser and citation components.
+Covers the Guardian, NYT and TheNewsAPI adapters (mocked HTTP), the daily request budget, chunking, dedup, RRF fusion, edition boost, source diversity, reranking, routing and resolution, date parsing and filtering, scope refusals, the scheduler's lock, security middleware, speech text preparation and playback ownership, API contracts, the SSE parser and citation components.
 
 **RAG evaluation** — 20 questions against a running stack with real keys:
 
@@ -349,7 +361,7 @@ Backend
  ├── Amazon ElastiCache Redis              REDIS_URL
  ├── SSM Parameter Store / Secrets Manager all API keys, injected at task start
  ├── Amazon CloudWatch Logs                /ecs/guardian-backend · /ecs/guardian-frontend
- └── Guardian · NYT · Tavily · OpenAI
+ └── Guardian · NYT · TheNewsAPI · Tavily · OpenAI
 ```
 
 | Piece | Where |
@@ -471,6 +483,7 @@ environment in Settings → Environments turns every deploy into an approval gat
 | Blank page, or "class does not exist" in dev | `tailwind.config.js` changed while the dev server was running — **restart Vite**. If it starts on `:5174`, an orphaned process still holds `:5173`; kill it. |
 | NYT missing from results | Key not licensed for Article Search (401). It falls back to Top Stories; enable "Article Search API" at developer.nytimes.com for archive search. |
 | `"nyt": "unavailable"` in `/api/health` | No `NYT_API_KEY`, or the key is rejected by every endpoint. |
+| TheNewsAPI missing from results | Daily budget spent (100/day on the free plan) — results fall back to stored articles and the source is listed in `degraded_sources`. Check the backend log for `budget exhausted`. |
 | Answer says evidence is insufficient | Index may be cold — run `python -m app.tasks.ingest_recent`, or wait for the next tick. |
 | Chat returns 500 | Missing `OPENAI_API_KEY`, or Postgres/pgvector not reachable — check `/api/health`. |
 | Frontend can't reach the API | `VITE_API_BASE_URL` mismatch, or the origin isn't in `FRONTEND_URL`/`EXTRA_CORS_ORIGINS`. |

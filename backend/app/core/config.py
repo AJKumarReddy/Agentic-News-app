@@ -14,8 +14,24 @@ class Settings(BaseSettings):
 
     # New York Times (Article Search API). Empty key disables the source.
     nyt_api_key: str = ""
+
+    # TheNewsAPI (api.thenewsapi.com) — an aggregator over thousands of
+    # outlets rather than one masthead. Empty key disables the source.
+    thenewsapi_api_key: str = ""
+    #: Articles per request. The free plan hard-caps this at 3 and rejects
+    #: anything larger, so the adapter clamps to whatever is set here.
+    thenewsapi_page_size: int = 3
+    #: Requests per UTC day. The free plan allows 100, and the scheduled
+    #: ingestion would spend that by mid-morning on its own (288 ticks/day),
+    #: leaving nothing for anyone actually using the site.
+    thenewsapi_daily_budget: int = 100
+    #: Of that budget, how much is held back for requests a person is waiting
+    #: on. Background ingestion stops at budget - reserve; interactive search
+    #: keeps going to the full budget.
+    thenewsapi_interactive_reserve: int = 40
+
     # Active publishers, in priority order
-    enabled_sources: str = "guardian,nyt"
+    enabled_sources: str = "guardian,nyt,thenewsapi"
 
     # Tavily web search — supplementary sources when Guardian evidence is thin.
     # Empty key disables web search entirely (Guardian-only mode).

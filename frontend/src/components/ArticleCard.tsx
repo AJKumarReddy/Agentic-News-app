@@ -55,7 +55,7 @@ export default function ArticleCard({ article }: { article: Article }) {
           </a>
           <button
             onClick={() =>
-              navigate('/', {
+              navigate('/chat', {
                 state: {
                   prefill: `Tell me about this article: "${article.headline}"`,
                   articleId: article.article_id,

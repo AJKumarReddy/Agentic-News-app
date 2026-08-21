@@ -107,7 +107,7 @@ export default function ArticlePage() {
               <button
                 onClick={() =>
                   passed &&
-                  navigate('/', {
+                  navigate('/chat', {
                     state: {
                       prefill: `Tell me about this article: "${passed.headline}"`,
                       articleId: passed.article_id,
@@ -171,7 +171,7 @@ export default function ArticlePage() {
           </a>
           <button
             onClick={() =>
-              navigate('/', {
+              navigate('/chat', {
                 state: {
                   prefill: `Answer questions about this article: "${article.headline}". Start with a brief overview.`,
                   articleId: article.article_id,

@@ -35,7 +35,7 @@
         },
         {
           "name": "ENABLED_SOURCES",
-          "value": "guardian,nyt"
+          "value": "guardian,nyt,thenewsapi"
         },
         {
           "name": "CHAT_MODEL",
@@ -110,6 +110,10 @@
         {
           "name": "NYT_API_KEY",
           "valueFrom": "arn:aws:ssm:us-east-2:<ACCOUNT_ID>:parameter/guardian-app/NYT_API_KEY"
+        },
+        {
+          "name": "THENEWSAPI_API_KEY",
+          "valueFrom": "arn:aws:ssm:us-east-2:<ACCOUNT_ID>:parameter/guardian-app/THENEWSAPI_API_KEY"
         },
         {
           "name": "TAVILY_API_KEY",

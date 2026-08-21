@@ -20,6 +20,7 @@ from app.core.config import get_settings
 from app.core.logging import configure_logging, log_event
 from app.database.session import SessionFactory, engine, init_db
 from app.services.search_service import search_news
+from app.sources.quota import background_ingest
 from app.rag.ingestion import ingest_articles
 
 logger = logging.getLogger(__name__)
@@ -77,6 +78,11 @@ async def ingest_recent(
     from_date = (date.today() - timedelta(days=days_back)).isoformat()
 
     sections = sections or DEFAULT_SECTIONS
+    # Marks everything below as background work. A metered source reads this to
+    # spend from its ingestion budget rather than the slice reserved for people
+    # waiting on a search — see app.sources.quota. Set on this task's context,
+    # so it does not leak into requests being served concurrently.
+    background_ingest.set(True)
     # fetch all sections concurrently; ingestion shares one session so it stays sequential
     results = await asyncio.gather(
         *(

@@ -6,10 +6,12 @@ import MessageBubble from '../components/MessageBubble';
 import VoiceNudge from '../components/VoiceNudge';
 import { getConversation } from '../services/api';
 import { useChat } from '../hooks/useChat';
+import { useSources } from '../hooks/useSources';
 import { useSpeech } from '../hooks/useSpeech';
 import type { useVoice } from '../hooks/useVoice';
 import type { SpeechState } from '../types';
 import { LogoMark } from '../components/Logo';
+import { joinNames } from '../utils/list';
 
 // each prompt gets its own accent so the grid reads as a palette, not a block
 const SUGGESTIONS = [
@@ -47,6 +49,7 @@ export default function ChatPage({
     reset,
   } = useChat();
   const speech = useSpeech();
+  const sources = useSources();
   const [searchParams] = useSearchParams();
   const location = useLocation();
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -176,9 +179,13 @@ export default function ChatPage({
               <h1 className="font-serif text-[28px] font-bold leading-tight text-ink-900 dark:text-ink-50 sm:text-[34px]">
                 News AI
               </h1>
+              {/* the newsrooms are named from the backend, not hard-coded —
+                  a source with no key is skipped, and this line promised
+                  reporting that would never arrive */}
               <p className="mx-auto mt-2.5 max-w-md text-[15px] leading-relaxed text-ink-600 dark:text-ink-300">
-                Ask anything about the news. Answers are grounded in reporting from The Guardian and
-                The New York Times, with every claim cited.
+                Ask anything about the news. Answers are grounded in reporting from{' '}
+                {sources.length > 0 ? joinNames(sources.map((s) => s.name)) : 'leading newsrooms'},
+                with every claim cited.
               </p>
 
               <div className="mx-auto mt-7 grid max-w-2xl grid-cols-1 gap-2.5 sm:mt-9 sm:grid-cols-2">
