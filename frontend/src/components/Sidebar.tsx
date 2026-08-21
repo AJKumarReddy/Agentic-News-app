@@ -243,11 +243,11 @@ export default function Sidebar({
 
         <Link
           to="/search"
-          aria-label="News AI — search the news"
+          aria-label="NewsLens — search the news"
           className="flex min-w-0 flex-1 items-center gap-2 rounded-lg px-1 py-2"
         >
           <LogoMark className="h-5 w-5 shrink-0" />
-          <span className="truncate text-[15px] font-semibold tracking-tight">News AI</span>
+          <span className="truncate text-[15px] font-semibold tracking-tight">NewsLens</span>
         </Link>
 
         <button

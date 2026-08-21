@@ -1,5 +1,16 @@
-/** Wordmark for the app. A newspaper glyph reads as "news" instantly and
- *  stays legible at 20px, which a lettermark in a coloured tile did not. */
+/** Wordmark for the app: a lens over column rules.
+ *
+ *  Both halves of the name in one shape — the circle reads as a lens, the
+ *  ruled lines inside it as newsprint. Kept to a single stroked path set for
+ *  the same reason the previous broadsheet glyph was: two overlapping shapes
+ *  (a loupe laid across a newspaper) turn to mush at the 20px the mobile bar
+ *  renders it at.
+ *
+ *  Two rules, not three, and of different lengths. Three at this diameter
+ *  merged into a single bar at 20px and the whole mark read as a browser
+ *  zoom-out button; equal-length rules read as an equals sign. Ragged lengths
+ *  with a wide gap are what make it read as a column of type.
+ */
 
 export function LogoMark({ className = 'h-5 w-5' }: { className?: string }) {
   return (
@@ -13,11 +24,12 @@ export function LogoMark({ className = 'h-5 w-5' }: { className?: string }) {
       className={className}
       aria-hidden="true"
     >
-      {/* folded broadsheet */}
-      <path d="M4 6a1.5 1.5 0 0 1 1.5-1.5h9A1.5 1.5 0 0 1 16 6v11.5a2 2 0 0 0 2 2H6.5a2.5 2.5 0 0 1-2.5-2.5V6Z" />
-      <path d="M16 9h2.5A1.5 1.5 0 0 1 20 10.5v6.5a2.5 2.5 0 0 1-2.5 2.5" />
-      {/* column rules */}
-      <path d="M7.5 8h5M7.5 11h5M7.5 14h3" />
+      {/* lens */}
+      <circle cx="9.5" cy="9.5" r="7.5" />
+      {/* two ragged column rules, spaced far enough to survive 20px */}
+      <path d="M6 7.5h8M6 11h5.5" />
+      {/* handle, leaving the rim on the 45° diagonal */}
+      <path d="M15 15l5.5 5.5" />
     </svg>
   );
 }
@@ -36,8 +48,8 @@ export default function Logo({
       </span>
       {!compact && (
         <span className="leading-tight">
-          <span className="block text-[15px] font-semibold tracking-tight text-white">News AI</span>
-          <span className="block text-[11px] text-white/45">Research assistant</span>
+          <span className="block text-[15px] font-semibold tracking-tight text-white">NewsLens</span>
+          <span className="block text-[11px] text-white/45">See beyond the headlines.</span>
         </span>
       )}
     </span>
