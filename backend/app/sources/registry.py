@@ -6,6 +6,7 @@ from app.core.config import get_settings
 from app.sources.base import NewsSource
 from app.sources.guardian_source import GuardianSource
 from app.sources.nyt import NYTSource
+from app.sources.thenewsapi import TheNewsAPISource
 
 logger = logging.getLogger(__name__)
 
@@ -13,7 +14,10 @@ _sources: dict[str, NewsSource] | None = None
 
 
 def _build() -> dict[str, NewsSource]:
-    return {source.id: source for source in (GuardianSource(), NYTSource())}
+    return {
+        source.id: source
+        for source in (GuardianSource(), NYTSource(), TheNewsAPISource())
+    }
 
 
 def all_sources() -> dict[str, NewsSource]:

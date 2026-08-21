@@ -62,6 +62,9 @@ def test_no_publisher_key_starts_nothing(monkeypatch):
     monkeypatch.setenv("INGEST_ENABLED", "true")
     monkeypatch.setenv("GUARDIAN_API_KEY", "")
     monkeypatch.setenv("NYT_API_KEY", "")
+    # every publisher has to be silenced, not just the two this test was
+    # written against — one configured key is enough to justify the loop
+    monkeypatch.setenv("THENEWSAPI_API_KEY", "")
     assert start(None) is None
     get_settings.cache_clear()
 

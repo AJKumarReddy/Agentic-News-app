@@ -93,7 +93,7 @@ def start(app) -> asyncio.Task | None:
     if not settings.ingest_enabled:
         logger.info("scheduled ingestion disabled")
         return None
-    if not (settings.guardian_api_key or settings.nyt_api_key):
+    if not (settings.guardian_api_key or settings.nyt_api_key or settings.thenewsapi_api_key):
         logger.info("scheduled ingestion idle: no publisher API key configured")
         return None
     task = asyncio.create_task(run_scheduler(), name="scheduled-ingestion")

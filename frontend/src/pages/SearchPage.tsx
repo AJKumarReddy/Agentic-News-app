@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import ArticleCard from '../components/ArticleCard';
 import { SECTIONS } from '../constants/sections';
 import { listSources, searchNews } from '../services/api';
+import { joinNames } from '../utils/list';
 import type { NewsSourceInfo, SearchResponse } from '../types';
 
 export default function SearchPage() {
@@ -85,7 +86,7 @@ export default function SearchPage() {
       <div className="mx-auto max-w-6xl px-4 py-6 sm:py-7">
         <h1 className="font-serif text-2xl font-bold text-ink-900 dark:text-ink-50">Search the news</h1>
         <p className="mt-1 text-sm text-ink-500 dark:text-ink-400">
-          Across {sources.length > 0 ? sources.map((s) => s.name).join(' and ') : 'all newsrooms'}
+          Across {sources.length > 0 ? joinNames(sources.map((s) => s.name)) : 'all newsrooms'}
         </p>
 
         {/* one column on a phone — two native date pickers side by side at
@@ -200,9 +201,11 @@ export default function SearchPage() {
                 role="status"
                 className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200"
               >
-                {result.degraded_sources
-                  .map((id) => sources.find((s) => s.id === id)?.name ?? id)
-                  .join(' and ')}{' '}
+                {joinNames(
+                  result.degraded_sources.map(
+                    (id) => sources.find((s) => s.id === id)?.name ?? id,
+                  ),
+                )}{' '}
                 {result.degraded_sources.length === 1 ? 'is' : 'are'} rate limited right now —
                 showing the most recent articles we already had. Newer stories may be missing.
               </div>

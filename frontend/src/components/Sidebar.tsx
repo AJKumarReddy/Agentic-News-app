@@ -74,7 +74,7 @@ export default function Sidebar({
     setConversations((prev) => prev.filter((c) => c.id !== id));
     try {
       await deleteConversation(id);
-      if (openConversationId === id) navigate('/', { state: { newChat: Date.now() } });
+      if (openConversationId === id) navigate('/chat', { state: { newChat: Date.now() } });
     } catch {
       setConversations(previous);
     } finally {
@@ -88,13 +88,13 @@ export default function Sidebar({
     setConversations([]);
     try {
       await deleteAllConversations();
-      navigate('/', { state: { newChat: Date.now() } });
+      navigate('/chat', { state: { newChat: Date.now() } });
     } catch {
       setConversations(previous);
     }
   };
 
-  const startNewChat = () => navigate('/', { state: { newChat: Date.now() } });
+  const startNewChat = () => navigate('/chat', { state: { newChat: Date.now() } });
 
   const navClass = ({ isActive }: { isActive: boolean }) =>
     `flex min-h-[44px] items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors md:min-h-0 ${
@@ -105,26 +105,29 @@ export default function Sidebar({
   // here in the parent, so the two copies never drift and nothing is fetched twice.
   const body = (
     <>
-      {/* the logo returns to the landing screen; without fresh state the
-          route is already "/" and the open conversation would stay mounted */}
+      {/* the logo returns to the landing screen, which is now the news rather
+          than the chat — so no newChat state to carry, since the route it
+          lands on never mounts ChatPage */}
       <Link
-        to="/"
-        state={{ newChat: Date.now() }}
+        to="/search"
         className="border-b border-white/10 px-5 py-4 transition-colors hover:bg-white/[0.04]"
       >
         <Logo />
       </Link>
 
       <div className="space-y-1 p-3">
+        {/* search leads: it is the landing page, so the rail opens with where
+            the reader already is. New chat sits under it as the way out —
+            a separate "Chat" link would only duplicate this button's route. */}
+        <NavLink to="/search" className={navClass}>
+          Search news
+        </NavLink>
         <button
           onClick={startNewChat}
           className="flex min-h-[44px] w-full items-center gap-2 rounded-md bg-brand-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-500 md:min-h-0"
         >
           <span className="text-base leading-none">+</span> New chat
         </button>
-        <NavLink to="/search" className={navClass}>
-          Search news
-        </NavLink>
       </div>
 
       <div className="mt-1 flex-1 overflow-y-auto px-3">
@@ -173,7 +176,7 @@ export default function Sidebar({
               }`}
             >
               <Link
-                to={`/?conversation=${conversation.id}`}
+                to={`/chat?conversation=${conversation.id}`}
                 className="flex min-h-[44px] min-w-0 flex-1 items-center truncate px-3 py-2 text-[13px] text-white/75 md:min-h-0"
                 title={conversation.title}
               >
@@ -239,9 +242,8 @@ export default function Sidebar({
         </button>
 
         <Link
-          to="/"
-          state={{ newChat: Date.now() }}
-          aria-label="News AI — new chat"
+          to="/search"
+          aria-label="News AI — search the news"
           className="flex min-w-0 flex-1 items-center gap-2 rounded-lg px-1 py-2"
         >
           <LogoMark className="h-5 w-5 shrink-0" />
