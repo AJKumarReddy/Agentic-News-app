@@ -1,10 +1,11 @@
-"""TheNewsAPI adapter and the daily budget that keeps it inside a free plan."""
+"""TheNewsAPI adapter and the daily budget that keeps it inside its plan."""
 
 from datetime import datetime
 
 import httpx
 import pytest
 
+import app.sources.base as base_module
 import app.sources.quota as quota_module
 import app.sources.thenewsapi as thenewsapi_module
 from app.sources.base import NewsSourceError
@@ -50,12 +51,13 @@ def no_cache(monkeypatch):
 @pytest.fixture(autouse=True)
 def unlimited_budget(monkeypatch):
     """Quota is exercised deliberately in its own tests; everywhere else it
-    would just be a Redis dependency in the way."""
+    would just be a Redis dependency in the way. Patched on `base`, which is
+    where every adapter now claims from its own publisher's budget."""
 
-    async def always(source_id, limit):
+    async def always(source_id, daily_budget, interactive_reserve):
         return True
 
-    monkeypatch.setattr(thenewsapi_module, "spend", always)
+    monkeypatch.setattr(base_module, "claim", always)
 
 
 def make_source(handler, api_key="test-key") -> TheNewsAPISource:
@@ -139,7 +141,7 @@ async def test_ids_are_prefixed_and_claimed_only_by_this_source():
     assert NYTSource(api_key="k").owns(article.article_id) is False
 
 
-async def test_maps_dates_sections_and_the_free_tier_limit_to_query_params():
+async def test_maps_dates_sections_and_the_plan_limit_to_query_params():
     seen = {}
 
     def handler(request):
@@ -160,8 +162,29 @@ async def test_maps_dates_sections_and_the_free_tier_limit_to_query_params():
     assert seen["published_after"] == "2026-08-01"
     # inclusive end date: the API's own bound is exclusive
     assert seen["published_before"] == "2026-08-11"
-    # asked for 12, but the free plan rejects anything over 3
-    assert seen["limit"] == "3"
+    # asked for 12, and the Basic plan's ceiling of 25 leaves it alone; the
+    # clamp only bites when the caller asks for more than the plan allows
+    assert seen["limit"] == "12"
+
+
+async def test_page_size_is_clamped_to_the_plans_ceiling():
+    """The API rejects a limit above the plan's own (25 on Basic), so the
+    ingestion sweep asking for 50 must not turn every call into a 400."""
+    seen = {}
+
+    def handler(request):
+        seen.update(dict(request.url.params))
+        return httpx.Response(200, json=PAYLOAD)
+
+    await make_source(handler).search("election", page_size=50)
+    assert seen["limit"] == str(thenewsapi_module.get_settings().thenewsapi_page_size)
+
+
+async def test_the_sweep_indexes_this_source_on_a_paid_plan():
+    """`bulk_efficient` is what puts a source in the scheduled ingestion. It was
+    False on the free plan's three articles per request; on Basic's 25 the
+    breadth this aggregator exists for belongs in the index too."""
+    assert TheNewsAPISource(api_key="test-key").bulk_efficient is True
 
 
 async def test_single_day_range_uses_the_exact_parameter():
@@ -333,19 +356,42 @@ async def test_ingestion_stops_at_the_reserve_while_search_keeps_going(monkeypat
     monkeypatch.setattr(
         thenewsapi_module.get_settings(), "thenewsapi_interactive_reserve", 40, raising=False
     )
+    assert source.daily_budget == 100
+    assert source.interactive_reserve == 40
 
+    redis.values[f"quota:thenewsapi:{quota_module._today()}"] = 60
     token = quota_module.background_ingest.set(True)
     try:
-        assert source._budget() == 60
-        redis.values[f"quota:thenewsapi:{quota_module._today()}"] = 60
-        # background is done at 60...
-        assert await quota_module.spend("thenewsapi", source._budget()) is False
+        # background is done at 60 — the budget less the reserve
+        assert await quota_module.claim("thenewsapi", 100, 40) is False
     finally:
         quota_module.background_ingest.reset(token)
 
     # ...but a reader searching still has the reserve to spend
-    assert source._budget() == 100
-    assert await quota_module.spend("thenewsapi", source._budget()) is True
+    assert await quota_module.claim("thenewsapi", 100, 40) is True
+
+
+async def test_an_unmetered_publisher_is_never_refused(monkeypatch):
+    """A budget of 0 is the default on `NewsSource`: an adapter whose plan
+    nobody has checked is not throttled on a guess."""
+    redis = FakeRedis()
+    monkeypatch.setattr(quota_module, "get_redis", lambda: redis)
+    for _ in range(50):
+        assert await quota_module.claim("unmetered", 0, 0) is True
+    assert await quota_module.spent_today("unmetered") == 0
+
+
+async def test_each_publisher_spends_from_its_own_counter(monkeypatch):
+    """Caps are per publisher. The Guardian running out must not mute the NYT,
+    which is what one shared counter would do."""
+    redis = FakeRedis()
+    monkeypatch.setattr(quota_module, "get_redis", lambda: redis)
+    assert await quota_module.claim("guardian", 2, 0) is True
+    assert await quota_module.claim("guardian", 2, 0) is True
+    assert await quota_module.claim("guardian", 2, 0) is False
+
+    assert await quota_module.claim("nyt", 2, 0) is True
+    assert await quota_module.spent_today("nyt") == 1
 
 
 async def test_budget_fails_open_when_redis_is_unreachable(monkeypatch):
@@ -365,7 +411,8 @@ async def test_a_zero_budget_is_always_refused(monkeypatch):
 
 async def test_ping_does_not_spend_a_request(monkeypatch):
     """Health is polled all day on a 60s cache; a real probe would cost ~1400
-    requests against a budget of 100 and take the source down by itself."""
+    requests a day — over half the Basic plan's budget — and take the source
+    down by itself."""
     called = False
 
     def handler(request):

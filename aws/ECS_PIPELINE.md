@@ -349,9 +349,12 @@ pulls, but relying on long-running replicas to run cron work means ingestion sto
 service scales to zero and restarts on every deploy. A scheduled one-shot task is explicit and
 independent of replica count.
 
-Note the interval. The in-process scheduler ticks every 5 minutes and refreshes **one** section
-per tick; invoking the module directly sweeps **all six** sections. Running it every 30 minutes
-lands on the same ~288 requests/day per publisher, inside the 500/day developer cap.
+Note the interval. The in-process scheduler ticks every 5 minutes and refreshes **one** desk per
+tick — 288 requests/day per publisher, inside the 500/day Guardian and NYT developer cap.
+Invoking the module directly sweeps **all 13** desks (`ingest_sections()`), so `rate(30 minutes)`
+below is 13 × 48 = **624/day per publisher**, over that cap. `rate(60 minutes)` lands at 312 and
+stays inside it; keep `(1440 / interval_minutes) × 13` under 500 when tuning. TheNewsAPI is
+metered separately and both figures sit well inside the ~1,500/day its budget leaves the sweep.
 
 ```bash
 aws scheduler create-schedule --name guardian-ingest \

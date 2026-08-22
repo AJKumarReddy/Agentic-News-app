@@ -13,10 +13,12 @@ and that is what `source` carries — "cnn.com", not the aggregator that relayed
 it. Citing the pipe instead of the newsroom would be misleading. `source_id`
 stays `thenewsapi`, since that is who fetched it.
 
-**A very small budget.** The free plan allows 100 requests a day and at most 3
-articles per request, against scheduled ingestion that ticks every five
-minutes. Every call therefore checks a shared daily counter first (see
-`app.sources.quota`), and background ingestion is cut off before interactive
+**A metered budget.** The plan in use is Basic: 2,500 requests a day and at
+most 25 articles per request (the free plan was 100 and 3, which is what the
+adapter was originally shaped around). That is no longer scarce next to a
+scheduler ticking every five minutes, but it is still finite and still shared
+across workers, so every call checks a daily counter first (see
+`app.sources.quota`) and background ingestion is cut off before interactive
 search is. Running out is not an error condition: the call raises
 `NewsSourceError` like any other failure, and `search_service` answers from the
 articles we already stored — the same path an unreachable publisher takes.
@@ -35,7 +37,7 @@ from app.guardian.models import NormalizedArticle
 from app.guardian.normalizer import content_hash
 from app.services.cache import cache_get, cache_set
 from app.sources.base import NewsSource, NewsSourceError, SourceResult
-from app.sources.quota import background_ingest, spend, spent_today
+from app.sources.quota import spent_today
 
 logger = logging.getLogger(__name__)
 
@@ -143,8 +145,12 @@ class TheNewsAPISource(NewsSource):
     domain = ""
 
     #: Politeness floor between calls. The daily budget is the real constraint;
-    #: this only stops a burst from tripping the per-second limit.
-    MIN_INTERVAL_SECONDS = 0.5
+    #: this only stops a burst from tripping the per-second limit. It was 0.5
+    #: while 100 requests had to last a day — on 2,500 the floor is the thing
+    #: that would hurt, since the registry hands every caller one shared
+    #: instance and its lock: a 13-desk sweep would hold a reader's search
+    #: behind six and a half seconds of deliberate waiting.
+    MIN_INTERVAL_SECONDS = 0.2
 
     def __init__(self, api_key: str | None = None, client: httpx.AsyncClient | None = None):
         settings = get_settings()
@@ -162,12 +168,15 @@ class TheNewsAPISource(NewsSource):
 
     @property
     def bulk_efficient(self) -> bool:
-        """No. The free plan returns three articles per request against a
-        hundred requests a day, so indexing from here buys ~17x less per
-        request than the Guardian's fifty. Kept off the scheduled sweep so the
-        whole budget stays available to searches someone is waiting on, where
-        this source earns its place on breadth rather than volume."""
-        return False
+        """Yes, on the Basic plan. It was False while the free plan returned
+        three articles per request against a hundred a day: indexing bought
+        ~17x less per request than the Guardian's fifty, and every request
+        spent sweeping was denied to a reader waiting on a search. Twenty-five
+        per request against 2,500 a day inverts both halves of that — half the
+        Guardian's yield, and the sweep's ~288 requests a day sit well inside
+        the ingestion share — so the breadth this source exists for now reaches
+        the index instead of only the live search path."""
+        return True
 
     def owns(self, article_id: str) -> bool:
         return article_id.startswith(ID_PREFIX)
@@ -175,23 +184,18 @@ class TheNewsAPISource(NewsSource):
     async def aclose(self) -> None:
         await self._client.aclose()
 
-    def _budget(self) -> int:
-        """Today's ceiling for this caller.
+    @property
+    def daily_budget(self) -> int:
+        return get_settings().thenewsapi_daily_budget
 
-        Ingestion runs unattended and can afford to miss a tick; somebody
-        waiting on a search cannot. So the background job is held to the budget
-        minus the reserve and stops while there is still quota left for the
-        interactive path.
-        """
-        settings = get_settings()
-        if background_ingest.get():
-            return settings.thenewsapi_daily_budget - settings.thenewsapi_interactive_reserve
-        return settings.thenewsapi_daily_budget
+    @property
+    def interactive_reserve(self) -> int:
+        return get_settings().thenewsapi_interactive_reserve
 
     async def _get(self, url: str, params: dict) -> dict:
-        if not await spend(self.id, self._budget()):
-            caller = "ingestion" if background_ingest.get() else "search"
-            raise NewsSourceError(f"TheNewsAPI daily budget exhausted for {caller}")
+        # every caller reaches here past its own cache check, so a claim only
+        # ever pays for a request that is really about to be made
+        await self.claim_request()
 
         params = {k: v for k, v in params.items() if v not in (None, "", [])}
         params["api_token"] = self.api_key
@@ -302,8 +306,9 @@ class TheNewsAPISource(NewsSource):
             return SourceResult()
 
         settings = get_settings()
-        # The plan caps this hard and rejects anything larger, so the caller's
-        # page size is a ceiling we are usually nowhere near.
+        # The plan caps this hard and rejects anything larger (25 on Basic), so
+        # `thenewsapi_page_size` is the ceiling and the caller's page size only
+        # ever asks for less.
         limit = max(1, min(page_size, settings.thenewsapi_page_size))
         category = SECTION_MAP.get((section or "").lower()) if section else None
 
@@ -406,7 +411,10 @@ class TheNewsAPISource(NewsSource):
         spend on the order of 1400 requests a day against a budget of 100 — the
         health check alone would take the source down. The cost is that a
         rejected key reads as available here until a real search reports it.
+        (The 60-second cache means a real probe would cost ~1,400 requests a
+        day — over half the Basic plan's 2,500, and the whole of the free
+        plan's 100.)
         """
         if not self.enabled:
             return False
-        return await spent_today(self.id) < get_settings().thenewsapi_daily_budget
+        return await spent_today(self.id) < self.daily_budget

@@ -1,10 +1,17 @@
-"""Daily request budget for metered sources, shared across workers.
+"""Daily request budget per publisher, shared across workers.
 
-TheNewsAPI's free plan allows 100 requests a day. Scheduled ingestion calls
-`search_news`, which fans out to every enabled publisher, so at a five-minute
-tick the background job alone would issue 288 requests — the budget would be
-gone before lunch and every request a reader was actually waiting on would
-fail. This module is what keeps those two uses from competing.
+Every publisher meters separately and at a different size — the Guardian and
+the NYT allow 500 requests a day on a developer key, TheNewsAPI 2,500 on its
+Basic plan — so the caps here are per source, and so are the counters. One
+shared ceiling would have to be the smallest of them, which would throttle a
+generous plan to a mean one and still overspend the other way round if a plan
+changed.
+
+Scheduled ingestion calls `search_news`, which fans out to every enabled
+publisher, so the sweep alone issues a few hundred requests a day against each
+of them. This module is what keeps that from competing with the requests a
+reader is waiting on: the reserve matters at any plan size, because it is what
+stops a shortened interval or a wider sweep from eating them.
 
 Two ideas, both small:
 
@@ -15,8 +22,8 @@ Two ideas, both small:
   signature in `base.py` and every adapter implementing it, for the benefit of
   one source.
 
-* **How much is left.** A counter in Redis keyed by UTC day, so all Gunicorn
-  workers spend from one budget rather than one each.
+* **How much is left.** A counter in Redis keyed by source and UTC day, so all
+  Gunicorn workers spend from one budget per publisher rather than one each.
 
 The counter fails *open*: if Redis is unreachable we allow the call. Going over
 the plan's limit returns a 402 from the publisher, which the adapter already
@@ -67,6 +74,29 @@ async def spend(source_id: str, limit: int) -> bool:
     if used > limit:
         return False
     return True
+
+
+async def claim(source_id: str, daily_budget: int, interactive_reserve: int) -> bool:
+    """Claim one request against `source_id`'s own budget for today.
+
+    The publisher's plan decides `daily_budget`; a budget of 0 means this
+    source is not metered here at all and the call always proceeds. That is the
+    default, so adding an adapter costs nothing until someone knows what its
+    plan actually allows — a made-up ceiling would throttle a publisher for no
+    reason, which is worse than not counting.
+
+    Ingestion runs unattended and can afford to miss a tick; somebody waiting
+    on a search cannot. So background work is held to `daily_budget -
+    interactive_reserve` and stops while there is still quota for the
+    interactive path. A reserve at or above the budget leaves background work
+    nothing, which is how it is turned off outright.
+    """
+    if daily_budget <= 0:
+        return True
+    limit = daily_budget
+    if background_ingest.get():
+        limit -= interactive_reserve
+    return await spend(source_id, limit)
 
 
 async def spent_today(source_id: str) -> int:

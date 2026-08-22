@@ -4,6 +4,7 @@ import httpx
 import pytest
 
 import app.sources.nyt as nyt_module
+import app.sources.quota as quota_module
 from app.guardian.models import NormalizedArticle
 from app.services.search_service import merge
 from app.sources.guardian_source import GuardianSource
@@ -651,3 +652,45 @@ def test_section_variants_do_not_collapse_distinct_sections():
     from app.sources.sections import section_match_values
 
     assert not set(section_match_values("world")) & set(section_match_values("business"))
+
+
+# ── the NYT's own daily budget ───────────────────────────────────────
+
+class _CountingRedis:
+    def __init__(self):
+        self.values: dict[str, int] = {}
+
+    async def incr(self, key):
+        self.values[key] = self.values.get(key, 0) + 1
+        return self.values[key]
+
+    async def expire(self, key, ttl):
+        return None
+
+    async def get(self, key):
+        return self.values.get(key)
+
+
+async def test_nyt_spends_from_its_own_budget_not_a_shared_one(monkeypatch):
+    """Each publisher's cap is counted under its own key, so exhausting one
+    leaves the others untouched. Past the ceiling the call is never sent."""
+    redis = _CountingRedis()
+    monkeypatch.setattr(quota_module, "get_redis", lambda: redis)
+    monkeypatch.setattr(nyt_module.get_settings(), "nyt_daily_budget", 1, raising=False)
+    monkeypatch.setattr(nyt_module.get_settings(), "nyt_interactive_reserve", 0, raising=False)
+
+    calls = 0
+
+    def handler(request):
+        nonlocal calls
+        calls += 1
+        return httpx.Response(200, json=NYT_PAYLOAD)
+
+    source = make_nyt(handler)
+    await source.search("senate")
+    with pytest.raises(Exception) as exc:
+        await source.search("senate again")
+
+    assert "budget exhausted" in str(exc.value)
+    assert calls == 1
+    assert list(redis.values) == [f"quota:nyt:{quota_module._today()}"]

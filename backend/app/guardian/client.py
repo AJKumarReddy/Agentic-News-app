@@ -74,6 +74,21 @@ class GuardianClient:
             log_event(logger, "guardian_api_cache_hit", path=path)
             return cached
 
+        # Past the cache, so this is a real call against the day's 500. The
+        # import is deferred because `app.sources` imports this module: at
+        # module scope it would close the loop.
+        from app.sources.quota import claim
+
+        settings = get_settings()
+        if not await claim(
+            "guardian", settings.guardian_daily_budget, settings.guardian_interactive_reserve
+        ):
+            # No status code: nothing was sent, so there is no response to
+            # describe. GuardianSource turns this into the same NewsSourceError
+            # an unreachable publisher raises, and search falls back to what we
+            # already stored.
+            raise GuardianAPIError("Guardian daily budget exhausted")
+
         params["api-key"] = self.api_key
 
         # serialise callers so concurrent requests queue instead of colliding

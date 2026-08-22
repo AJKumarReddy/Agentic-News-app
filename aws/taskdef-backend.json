@@ -38,6 +38,34 @@
           "value": "guardian,nyt,thenewsapi"
         },
         {
+          "name": "GUARDIAN_DAILY_BUDGET",
+          "value": "500"
+        },
+        {
+          "name": "GUARDIAN_INTERACTIVE_RESERVE",
+          "value": "150"
+        },
+        {
+          "name": "NYT_DAILY_BUDGET",
+          "value": "500"
+        },
+        {
+          "name": "NYT_INTERACTIVE_RESERVE",
+          "value": "150"
+        },
+        {
+          "name": "THENEWSAPI_PAGE_SIZE",
+          "value": "25"
+        },
+        {
+          "name": "THENEWSAPI_DAILY_BUDGET",
+          "value": "2500"
+        },
+        {
+          "name": "THENEWSAPI_INTERACTIVE_RESERVE",
+          "value": "1000"
+        },
+        {
           "name": "CHAT_MODEL",
           "value": "gpt-4o"
         },

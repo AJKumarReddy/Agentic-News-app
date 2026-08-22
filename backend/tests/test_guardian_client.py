@@ -3,6 +3,7 @@ import json
 import httpx
 import pytest
 
+import app.sources.quota as quota_module
 from app.guardian import client as guardian_module
 from app.guardian.client import GuardianAPIError, GuardianClient
 
@@ -217,3 +218,83 @@ async def test_exhausted_retries_keep_the_429(monkeypatch):
 
 async def _done():
     return None
+
+
+# ── the Guardian's own daily budget ──────────────────────────────────
+
+class _CountingRedis:
+    """Enough of the Redis surface for the day counter."""
+
+    def __init__(self):
+        self.values: dict[str, int] = {}
+
+    async def incr(self, key):
+        self.values[key] = self.values.get(key, 0) + 1
+        return self.values[key]
+
+    async def expire(self, key, ttl):
+        return None
+
+    async def get(self, key):
+        return self.values.get(key)
+
+
+@pytest.fixture
+def counting_redis(monkeypatch):
+    redis = _CountingRedis()
+    monkeypatch.setattr(quota_module, "get_redis", lambda: redis)
+    return redis
+
+
+async def test_a_spent_budget_stops_the_call_before_it_is_sent(counting_redis, monkeypatch):
+    """The Guardian meters on its own 500/day, counted separately from every
+    other publisher. Past the ceiling the request is never made — the error
+    carries no status code because there is no response to describe."""
+    calls = 0
+
+    def handler(request):
+        nonlocal calls
+        calls += 1
+        return httpx.Response(200, json=SEARCH_PAYLOAD)
+
+    monkeypatch.setattr(guardian_module.get_settings(), "guardian_daily_budget", 2, raising=False)
+    monkeypatch.setattr(
+        guardian_module.get_settings(), "guardian_interactive_reserve", 0, raising=False
+    )
+    client = GuardianClient(
+        api_key="k",
+        client=httpx.AsyncClient(
+            transport=httpx.MockTransport(handler), base_url=GuardianClient.BASE_URL
+        ),
+    )
+
+    await client.search(query="one")
+    await client.search(query="two")
+    with pytest.raises(GuardianAPIError) as exc:
+        await client.search(query="three")
+
+    assert exc.value.status_code is None
+    assert calls == 2  # the refused one never reached the transport
+
+
+async def test_a_cache_hit_costs_no_budget(counting_redis, monkeypatch):
+    """A cached answer costs the publisher nothing, so it must not cost quota
+    either — which is why the claim sits after the cache lookup."""
+
+    async def hit(key):
+        return {"results": [], "total": 0, "pages": 0, "current_page": 1}
+
+    monkeypatch.setattr(guardian_module, "cache_get", hit)
+    monkeypatch.setattr(guardian_module.get_settings(), "guardian_daily_budget", 1, raising=False)
+    client = GuardianClient(
+        api_key="k",
+        client=httpx.AsyncClient(
+            transport=httpx.MockTransport(lambda r: httpx.Response(500)),
+            base_url=GuardianClient.BASE_URL,
+        ),
+    )
+
+    for _ in range(5):
+        await client._get("/search", {"page-size": 1})
+
+    assert counting_redis.values == {}

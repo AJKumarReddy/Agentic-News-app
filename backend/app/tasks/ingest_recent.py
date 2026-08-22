@@ -27,16 +27,17 @@ from app.rag.ingestion import ingest_articles
 
 logger = logging.getLogger(__name__)
 
-# Derived from the canonical categories rather than listed by hand. The old
-# list was eleven Guardian slugs, which indexed `business` and `money` as two
-# separate sweeps of one subject and spent a tick each cycle on
-# `commentisfree` — opinion, not reporting. One slug per category means the
-# rotation completes in under half the time, so everything in the index is
-# fresher, and the indexer covers exactly what the feed prioritises.
+# Derived from the canonical categories rather than listed by hand: every
+# Guardian desk the five categories cover, ordered weightiest category first
+# (see `ingest_sections`). Thirteen desks, not one per category, because
+# retrieval widens a slug into its subject neighbours (app/sources/sections.py)
+# — a question about `us-news` also looks under `politics`, `world` and
+# `commentisfree`, so a desk that is never ingested turns that widening into a
+# filter over an empty set: broader-looking, and finding less.
 #
-# Breadth still matters within a category: retrieval widens a slug into its
-# subject neighbours (see app/sources/sections.py), so indexing `politics`
-# still answers questions filed under us-news and world.
+# The weight ordering is what makes a cut-short cycle degrade gracefully. The
+# rotation walks this list, so the desks the feed leads with come round first
+# after a restart and are never the ones starved.
 DEFAULT_SECTIONS = ingest_sections()
 
 #: Articles pulled per section per publisher per tick. A section can easily
@@ -77,11 +78,13 @@ async def ingest_recent(
     # so it does not leak into requests being served concurrently.
     background_ingest.set(True)
 
-    # Only sources that return volume per request. An aggregator capped at
-    # three articles a call would spend a metered budget here to add almost
-    # nothing to the index, and every one of those requests is denied to a
-    # reader waiting on a search. It still appears in search results — it is
-    # excluded from the *sweep*, not from the product.
+    # Only sources that return volume per request. A source metered so tightly
+    # that a call adds a handful of articles would spend its budget here to
+    # barely move the index, and every one of those requests is denied to a
+    # reader waiting on a search — so it is excluded from the *sweep*, not from
+    # the product, and still appears in search results. TheNewsAPI qualified
+    # while it was on the free plan's three articles per call; on Basic's 25 it
+    # sweeps like the mastheads do.
     bulk = [s.id for s in enabled_sources() if s.bulk_efficient]
     if not bulk:
         log_event(logger, "scheduled_ingest_skipped", reason="no bulk-efficient source")

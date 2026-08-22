@@ -14,7 +14,7 @@ React + TypeScript + Vite + Tailwind  →  FastAPI + LangGraph + pgvector  →  
 
 - [Architecture](#architecture) · [Design decisions](#key-design-decisions)
 - [Quick start](#quick-start-local) · [Configuration](#configuration)
-- [How it works](#how-it-works): [routing](#1-routing--the-understand-step) · [RAG](#2-the-rag-pipeline) · [citations](#3-citation-integrity)
+- [How it works](#how-it-works): [routing](#1-routing--the-understand-step) · [RAG](#2-the-rag-pipeline) · [citations](#3-citation-integrity) · [spoken answers](#4-spoken-answers) · [spoken questions](#5-spoken-questions)
 - [The feed pipeline](#the-feed-pipeline) · [News sources](#news-sources) · [Scheduled ingestion](#scheduled-ingestion)
 - [Interface](#interface) · [API](#backend-api) · [Testing](#testing)
 - [Deployment](#deployment): [production on ECS Fargate](#production-github-actions--ecr--ecs-fargate) · [local Docker Compose](#local-docker-compose)
@@ -34,12 +34,13 @@ flowchart TB
     B --> PG[(PostgreSQL 16 + pgvector<br/>articles · chunks · chats)]
     B --> R[(Redis — cache + locks)]
     B --> SCH[Ingestion<br/>in-process in dev · scheduled task in prod]
+    B --> AUD[Speech<br/>answers read aloud · questions transcribed<br/>both opt-in]
 
     AG --> UN[understand<br/>resolve · route · build queries]
     UN --> SRC[Sources]
     SRC --> G[Guardian Content API]
     SRC --> NY[NY Times API]
-    SRC --> TNA[TheNewsAPI<br/>aggregator · daily budget]
+    SRC --> TNA[TheNewsAPI<br/>aggregator · metered daily budget]
     UN --> WEB[Tavily web search<br/>gated · cited separately]
 
     SRC --> FEED[Feed pipeline<br/>exclude · cluster · rank]
@@ -73,12 +74,14 @@ flowchart TB
 | Date ranges | **Filter first, widen loudly** | The stated range is always tried first and alone. If it finds nothing the search widens — but the notice names the period that came up empty and the answer opens by saying so, rather than quietly serving results from outside it. Named periods are rolling windows ("this week" = 7 days), never calendar weeks that collapse to a single day on a Monday. The same range bounds publisher retrieval, NYT's Top Stories feed, and web results. |
 | Sections | **A section is a filing decision, not a subject** | US political reporting lands in `us-news`, `politics`, `world` or `commentisfree` depending on the desk, so a section slug is widened to its subject neighbours before it reaches retrieval. Both sides are reduced to letters and digits first — the Guardian stores "US news", the NYT stores "U.S.", and we ask with "us-news". See `sources/sections.py`. |
 | Dedup | **Article ID + SHA-256 content hash** | An article is embedded once; re-embedding only when content or the embedding model changes. |
+| Model tier | **Chosen per turn, without a model call** | One model is either too slow for "summarise this article" or too shallow for "why did this happen". `llm/routing.py` picks FAST / GENERAL / REASONING from the intent the `understand` step already produced and from how much evidence came back — signals that exist by then, so no round trip is spent deciding. Tiers are settings, not hard-coded names, and reasoning defaults to the general model so no deployment is billed for one it did not choose. |
 | Streaming | **Server-Sent Events** | Route decision, pipeline status and answer tokens stream into the UI. |
 | Feed shape | **Canonical categories, one config** | Browsing by publisher slug meant `finance`, `money`, `economy` and `business` were four requests describing one subject, against providers that meter them. Five canonical categories now declare what each covers, what every provider calls it, and what share of the feed it starts with — in `sources/categories.py`, so weights are edited in one place rather than hunted through the codebase. Free text resolves through the same table, which is how "what's happening in AI?" reaches technology without the caller knowing any provider's vocabulary. |
 | Non-news | **Filtered before ranking, not before rendering** | Crosswords and sponsored posts are filtered during normalisation because position is scarce: an advert that reaches the ranker competes on freshness like any article and can take the top slot. Structured signals are trusted (a `sponsored` section is the publisher's own assertion); headline text is a backstop for puzzles only. Promotional *wording* is deliberately not matched on headlines — "Meta's advertising revenue fell" is news about advertising, and removing it would be a worse failure than keeping one unlabelled advert. A puzzle *instance* is told from an article *about* puzzles by its serial number or its label before a colon. See `sources/exclusions.py`. |
 | Ranking | **Importance × relevance × freshness, never `published_at DESC`** | Date-sorting puts a five-minute-old council item above an hour-old rate decision. `services/ranking.py` combines category weight, exponential time decay (six-hour half-life), significance terms, source authority, market impact and cross-source confirmation into one score. Every weight is a field on one dataclass; there are no magic numbers at the call sites. Freshness is strong but bounded — a genuinely major story outranks a fresher trivial one, and a stale story is actively penalised rather than merely faded. |
 | Duplicate coverage | **Cluster first, then score** | Six outlets covering one rate decision is one story, not six cards. Articles are grouped by headline-token overlap, the highest-authority member fronts the cluster, and the rest become supporting citations. Ordering matters: scoring before clustering would let six near-identical copies each earn a top slot and crowd out the rest of the day. Independent *outlets* are counted, not articles — a wire story under three mastheads of one group is one newsroom's work, so syndication cannot fake corroboration. |
-| Ingestion budget | **Index where the requests buy the most** | TheNewsAPI returns three articles per request against 100 a day; the Guardian returns fifty. Indexing from the former buys ~17× less per request, and every request spent there is denied to a reader waiting on a search — so it is excluded from the scheduled sweep by a `bulk_efficient` flag and used only on the interactive path, where its breadth is the point. The sweep covers every desk retrieval can widen into: an un-ingested desk makes that widening a filter over an empty set, which looks broader and finds less. |
+| Request budgets | **Per publisher, never shared** | Plans differ by an order of magnitude — 500/day on a Guardian or NYT developer key, 2,500 on TheNewsAPI's Basic plan — so each source declares its own ceiling and spends from its own Redis counter, keyed by source and UTC day. One shared cap would have to be the smallest plan in use, throttling a generous one to a mean one; it would also let a single greedy publisher mute the rest. The default is **0, meaning unmetered**: an adapter whose plan nobody has checked is not throttled on a guess. Counting fails *open*, because a cache outage muting every publisher is worse than briefly overspending, and the publisher's own 402/429 already degrades gracefully. |
+| Ingestion budget | **Index where the requests buy the most** | A `bulk_efficient` flag decides who joins the scheduled sweep, and it is a statement about yield per request, not about quality. On TheNewsAPI's free plan — three articles per request against 100 a day, against the Guardian's fifty — indexing bought ~17× less per request and every request spent sweeping was denied to a reader waiting on a search, so it stayed on the interactive path only. The Basic plan's 25 per request against 2,500 a day clears that bar, so it now sweeps too; the flag is the one line that changes. The sweep covers every desk retrieval can widen into: an un-ingested desk makes that widening a filter over an empty set, which looks broader and finds less. |
 | Speech latency | **Segments in parallel, cached individually** | A long answer is split under the provider's input cap, and those segments used to be synthesised in a `for` loop — so a three-segment answer cost three round trips end to end and the reader waited for the sum. They are independent, so they now go concurrently (bounded by `TTS_MAX_CONCURRENCY`) and the wait is the slowest one. `gather` preserves order, which is what keeps the sentences in sequence. Each segment is cached on its own text as well as the whole answer, so a replay or a shared opening reuses work. |
 | Autoplay refusal | **Not an error** | A `play()` the browser withheld for want of a gesture used to land in the same state as a failed request, telling the reader "audio unavailable" and sending them to retry a button that would fail identically. It is now detected separately and answered with a one-time "tap once to enable automatic audio", which clears permanently once anything has played. |
 | Greetings | **Answered, not searched** | The understanding step's job is to resolve a fragment into a searchable question, so given "hi" it invents one — which is how a greeting returned a Guardian piece on water storage "understood as" a question nobody asked. `GREET` is now a mode alongside `DECLINE`: a deterministic check before the model runs, a fixed reply, no retrieval, no citation, and no cost. Anchored and length-capped, because the opposite failure is worse — "hi, what happened in Gaza today" must still search. |
@@ -88,14 +91,18 @@ flowchart TB
 ```
 ├── frontend/               React + TS + Vite + Tailwind
 │   └── src/
-│       ├── components/     Sidebar, chat, cards, citations, theme toggle
+│       ├── components/     Sidebar, chat bubbles, cards, citations, Sage panel,
+│       │                   mic button, voice + theme toggles
 │       ├── pages/          Search (the landing page) · Chat · Article intelligence
-│       ├── hooks/          useChat (SSE), useTheme
+│       ├── hooks/          useChat (SSE) · useSpeech · useRecorder · useVoice
+│       │                   · useCapabilities · useTheme
 │       ├── services/       API client
+│       ├── utils/          SSE parser, transcript, publisher labels, storage
+│       ├── types/          shared response and state types
 │       └── constants/      section taxonomy
 ├── backend/
 │   ├── app/
-│   │   ├── api/            chat · news · rag · health routers
+│   │   ├── api/            chat · news · rag · audio · health routers
 │   │   ├── agents/         graph, understand (resolve+route), dateparse, tools
 │   │   ├── sources/        NewsSource abstraction · Guardian · NYT · TheNewsAPI
 │   │   │                   categories (canonical + weights) · exclusions · quota · registry
@@ -104,11 +111,12 @@ flowchart TB
 │   │   ├── rag/            chunker · embeddings · vector store · retrieval · reranker · ingestion
 │   │   ├── database/       SQLAlchemy models, session, repositories
 │   │   ├── llm/            chat model factory, prompts (grounding rules)
-│   │   ├── services/       chat orchestration/SSE, search, ranking, article intelligence, cache
+│   │   ├── services/       chat orchestration/SSE, search, ranking, article
+│   │   │                   intelligence, speech (TTS/STT), cache
 │   │   ├── tasks/          scheduler, ingest_recent, edition backfill
 │   │   └── core/           config, JSON logging, security middleware
-│   ├── tests/              433 tests
-│   └── evaluation/         20-question RAG evaluation harness
+│   ├── tests/              472 tests
+│   └── evaluation/         30-question RAG evaluation harness
 ├── aws/                    ECS Fargate task definitions + production deployment guide
 ├── scripts/                health-check.sh · guardian_api_smoke.py
 ├── .github/workflows/      test.yml (tests) · aws.yml (build → ECR → ECS deploy)
@@ -118,7 +126,7 @@ flowchart TB
 
 ## Quick start (local)
 
-Prerequisites: Docker Desktop, plus API keys — [Guardian](https://open-platform.theguardian.com/access/) (free), [OpenAI](https://platform.openai.com/), optionally [NYT](https://developer.nytimes.com/), [TheNewsAPI](https://www.thenewsapi.com/account/dashboard) and [Tavily](https://tavily.com) (all free tiers).
+Prerequisites: Docker Desktop, plus API keys — [Guardian](https://open-platform.theguardian.com/access/) (free), [OpenAI](https://platform.openai.com/), optionally [NYT](https://developer.nytimes.com/), [TheNewsAPI](https://www.thenewsapi.com/account/dashboard) and [Tavily](https://tavily.com) (free tiers work; TheNewsAPI defaults here assume its Basic plan — see `THENEWSAPI_*` in the env table).
 
 ```bash
 git clone https://github.com/AJKumarReddy/Agentic-News-app.git
@@ -151,9 +159,15 @@ Full list in [.env.example](.env.example). The ones that matter:
 |---|---|
 | `GUARDIAN_API_KEY` · `NYT_API_KEY` · `THENEWSAPI_API_KEY` | publishers; a source with no key is skipped, so the app runs on whichever keys exist |
 | `ENABLED_SOURCES` | active publishers in priority order (`guardian,nyt,thenewsapi`) |
-| `THENEWSAPI_PAGE_SIZE` · `THENEWSAPI_DAILY_BUDGET` · `THENEWSAPI_INTERACTIVE_RESERVE` | free-tier limits (3 per request, 100 per day) and the slice held back for interactive search |
+| `GUARDIAN_DAILY_BUDGET` · `NYT_DAILY_BUDGET` · `THENEWSAPI_DAILY_BUDGET` | requests per UTC day, **counted per publisher** (500 / 500 / 2,500). A source that runs out degrades to stored articles; the others are unaffected |
+| `*_INTERACTIVE_RESERVE` | of each budget, the slice background ingestion may not touch (150 / 150 / 1,000) |
+| `THENEWSAPI_PAGE_SIZE` | articles per request; the plan hard-caps it (Basic: 25) and rejects more |
+| `TTS_ENABLED` · `TTS_MODEL` · `TTS_VOICE` | answer playback; `TTS_ENABLED=false` removes the control from the UI entirely |
 | `TTS_MAX_CONCURRENCY` | segments of one answer synthesised at once; the wait becomes the slowest segment rather than the sum |
+| `STT_ENABLED` · `STT_MODEL` · `STT_LANGUAGE` | spoken questions; naming a language is cheaper and more accurate than auto-detect when a deployment knows its audience |
+| `STT_MAX_SECONDS` · `STT_MAX_BYTES` | the browser stops recording at the first (60 s); the endpoint refuses past the second (8 MB), so a forgotten open microphone cannot become a 413 |
 | `OPENAI_API_KEY` · `CHAT_MODEL` · `EMBEDDING_MODEL` | generation and embeddings |
+| `CHAT_MODEL_FAST` · `CHAT_MODEL_REASONING` | the other two tiers `llm/routing.py` picks per turn. Reasoning defaults to the general model, so nobody is billed for one they did not choose |
 | `TAVILY_API_KEY` | optional web fallback; empty = newsroom-only, no web request ever made |
 | `WEB_SEARCH_THRESHOLD` | newsroom sources at or below this count trigger a web top-up |
 | `DATABASE_URL` · `REDIS_URL` | infrastructure — containers locally, RDS and ElastiCache in production, same two variables |
@@ -166,7 +180,8 @@ Full list in [.env.example](.env.example). The ones that matter:
 | `RERANKER` | `llm` (default) · `cohere` · `none` |
 | `FRONTEND_URL` · `EXTRA_CORS_ORIGINS` | CORS allowlist — never `*` in production |
 | `API_KEY` · `VITE_API_KEY` | optional `X-API-Key` gate for private deployments |
-| `RATE_LIMIT_PER_MINUTE` · `CHAT_RATE_LIMIT_PER_MINUTE` | per-IP budgets (30 / 10). The stricter one covers every path that costs an LLM call, an embedding or a publisher request |
+| `RATE_LIMIT_PER_MINUTE` · `CHAT_RATE_LIMIT_PER_MINUTE` · `AUDIO_RATE_LIMIT_PER_MINUTE` | per-IP budgets (30 / 10 / 20). The chat budget covers every path that costs an LLM call, an embedding or a publisher request; audio gets its own, because with autoplay on every turn is a chat request *and* an audio one and a shared bucket would read as broken chat |
+| `ALLOWED_HOSTS` · `MAX_BODY_BYTES` · `REQUEST_TIMEOUT_SECONDS` | optional Host allowlist, request body cap (64 KB) and time-to-first-byte ceiling (120 s) |
 | `TRUSTED_PROXY_HOPS` | proxies in front of the app (default `1` = one ALB/nginx). The client address is read that many entries in from the right of `X-Forwarded-For`; everything further left is written by the caller. Set `0` when the app is reached directly |
 | `ADMIN_API_KEY` | unlocks the operator endpoints (`/api/rag/*`, `/api/intent`) via `X-Admin-Key`. Unset, they are **closed in production** and open in development. Never put this in the SPA bundle |
 
@@ -190,6 +205,10 @@ One LLM call resolves the message *and* routes it. Inspect its decision without 
 curl -X POST http://localhost:8000/api/intent -H "Content-Type: application/json" \
   -d '{"message":"what do other outlets say about the merger"}'
 ```
+
+It is an operator endpoint, like `/api/rag/*`: open in development, and in production it answers
+`404` unless the request carries `X-Admin-Key: $ADMIN_API_KEY` — a 404 rather than a 403, so the
+response says nothing about what is there.
 
 | Route | When | Path |
 |---|---|---|
@@ -245,6 +264,33 @@ Latency comes from the split: a long answer exceeds the provider's per-request i
 - **The prose is prepared first.** `app/core/text.py` strips citation markers, headings, bullets and link URLs, and drops tables whole — a listener hears "bracket one" as a defect, not as a source. That module also owns the citation regex the agent graph uses for history replay, so both agree on what a citation is.
 - **Its own rate-limit bucket.** With autoplay on, every turn is a chat request *and* an audio request; sharing the chat budget would halve usable chat throughput and the 429 would read as a broken chat.
 - **Cached on the text**, not the message, so the same answer reached from another conversation is free. Redis holds it for an hour — audio dwarfs the JSON around it under an LRU cap — and the browser caches the long tail.
+
+### 5. Spoken questions
+
+The mirror of playback, and gated the same way: `STT_ENABLED` decides whether a deployment offers
+it, the mic button only appears where the browser can actually record, and nothing is captured
+until the reader presses it.
+
+- **The recording is the request body**, not a multipart form — the only field is the audio, which
+  keeps `python-multipart` out of the dependency list for nothing lost. `BodySizeLimitMiddleware`
+  caps it per path, and the byte length is re-checked after the read, because a chunked upload
+  declares no `Content-Length` for the middleware to reject.
+- **The container is matched, never trusted.** Chrome and Firefox record WebM/Opus and Safari only
+  ever produces MP4, so the browser probes `MediaRecorder.isTypeSupported` rather than assuming,
+  and the server maps the declared content type against a fixed table — the filename handed to the
+  API is ours, never a string the caller chose. Anything else is a 415.
+- **No ownership check, and no cache.** Unlike `/speech` it reads nothing back to the caller, it
+  only hands them their own words; and a recording is a few hundred kilobytes that will never be
+  sent again, so caching it would evict the article entries that keep the site up when a publisher
+  is unreachable.
+- **Silence is not a failure.** Stop pressed without speaking returns `204`, and the composer
+  simply returns to idle. A blocked microphone is reported as the permission problem it is, not as
+  a generic error.
+- **Transcribed text is sanitised and dropped into the composer**, never sent on its own.
+  Speech-to-text mishears exactly the proper nouns a news question turns on, and a wrong question
+  sent automatically costs a retrieval and an answer to undo — so the reader reads what was heard,
+  edits if needed, and presses send. The caret lands after the insert, so typing continues the
+  sentence.
 
 ---
 
@@ -341,21 +387,21 @@ effective = default_weights() + user_interest + query_intent + breaking_event
 |---|---|---|
 | **The Guardian** | Full article bodies, all sections, deep archive | The richest evidence; `productionOffice` enables US-desk preference |
 | **The New York Times** | Headlines, abstracts and lead paragraphs | The API exposes **no article bodies** — evidence is short by design |
-| **TheNewsAPI** | Thousands of outlets, US-weighted | An aggregator, not a masthead. Descriptions and snippets only; each article is cited under **its own publisher** |
+| **TheNewsAPI** | Thousands of outlets, US-weighted | An aggregator, not a masthead. Descriptions and snippets only; each article is cited under **its own publisher**. Metered: **2,500 requests/day, 25 articles each** on the Basic plan, split between the sweep and live search |
 | **Tavily (web)** | Everything else | Supplementary only, gated and cited separately |
 
 **NYT specifics worth knowing:**
 
 - NYT enables each API **per key**. A key valid for Top Stories may be rejected by Article Search. The adapter detects a 401 once, remembers it, and falls back to Top Stories rather than dropping NYT entirely — enable "Article Search API" for your app at [developer.nytimes.com](https://developer.nytimes.com/) to unlock keyword search of the archive.
 - A keyword-less section browse uses **Top Stories** directly, since Article Search would otherwise be asked for the literal word "news".
-- Rate limits are tight (~5 req/min, 500/day); requests are throttled and responses cached.
+- Rate limits are tight (~5 req/min, 500/day); the per-minute floor is a throttle in the adapter, the daily cap is its own `NYT_DAILY_BUDGET` counter, and responses are cached on top of both.
 - Its `multimedia` field has shipped as a list of objects, a list of strings and a dict — all three are handled.
 
 **TheNewsAPI specifics worth knowing:**
 
 - It relays other newsrooms, so `source` carries the **publisher that actually reported the story** ("cnn.com", "salon.com") while `source_id` stays `thenewsapi`. Citing the aggregator would misattribute every article.
-- The free plan is **100 requests/day and 3 articles per request**, against a scheduler that ticks every five minutes. A daily counter in Redis is shared across workers, and background ingestion is cut off at `THENEWSAPI_DAILY_BUDGET - THENEWSAPI_INTERACTIVE_RESERVE` so it can never drain the quota a reader's search needs. Running out degrades to stored articles, exactly like an unreachable publisher.
-- `/api/health` reports it from the budget rather than by calling the API — a real probe on a 60-second cache would spend ~1,400 requests/day against a budget of 100 and take the source down by itself.
+- The plan is metered per day — **Basic: 2,500 requests/day and 25 articles per request** (free: 100 and 3), on its own counter, separate from the Guardian's 500 and the NYT's — against a scheduler that ticks every five minutes. A daily counter in Redis is shared across workers, and background ingestion is cut off at `THENEWSAPI_DAILY_BUDGET - THENEWSAPI_INTERACTIVE_RESERVE` so it can never drain the quota a reader's search needs. Running out degrades to stored articles, exactly like an unreachable publisher. Moving plans is three settings, not a code change; `bulk_efficient` in the adapter is the one judgement call that goes with them.
+- `/api/health` reports it from the budget rather than by calling the API — a real probe on a 60-second cache would spend ~1,400 requests/day, over half the Basic plan and many times the free one.
 - Articles arrive tagged `["general", "politics"]` and similar; the category asked for wins, then anything more specific than the catch-all, so a section browse files its results where the section filter will find them.
 - Its ten categories are mapped into the app's Guardian-flavoured section vocabulary on the way in ("tech" is stored as "Technology").
 - Because it aggregates hundreds of image CDNs, the frontend CSP allows `img-src https:`. See the comment in `frontend/nginx.conf`.
@@ -367,19 +413,44 @@ Because NYT and TheNewsAPI chunks are an order of magnitude shorter than full-te
 The same module keeps the index current in both environments — only the thing that calls it
 changes.
 
-| | Trigger | Interval | Scope per run |
-|---|---|---|---|
-| **Local** | in-process loop inside the backend | 5 minutes | one section, rotating |
-| **Production** | EventBridge Scheduler → one-shot Fargate task | 30 minutes | all six sections |
+| | Trigger | Interval | Scope per run | Requests/day per publisher |
+|---|---|---|---|---|
+| **Local** | in-process loop inside the backend | 5 minutes | one desk, rotating | 288 |
+| **Production** | EventBridge Scheduler → one-shot Fargate task | 30 minutes | all 13 desks | 624 |
 
-Either way it lands on **~288 requests/day per publisher**, inside the 500/day developer cap.
+The sweep covers **13 Guardian desks, weightiest category first** (`sources/categories.py`
+→ `ingest_sections()`) — every desk the five canonical categories cover, not one per category.
+That is a correctness requirement rather than thoroughness: retrieval widens a slug into its
+subject neighbours, so a question about `us-news` also looks under `politics`, `world` and
+`commentisfree`, and a desk that is never ingested makes that widening a filter over an empty set.
+Ordering by weight is what makes a cut-short cycle degrade gracefully — the desks the feed leads
+with come round first after a restart.
+
+Every publisher marked `bulk_efficient` is swept — the Guardian, the NYT and, since the move to
+TheNewsAPI's Basic plan, TheNewsAPI as well. The flag asks one question: does a request buy enough
+articles to be worth spending a metered budget on indexing rather than on a search someone is
+waiting for? At three articles a call it did not; at 25 it does.
+
+Each publisher's cap is enforced on its own counter (`sources/quota.py`), so the sweep is charged
+per source and one publisher running out never mutes the others. Background work stops at
+`budget − reserve`, which is what keeps a sweep from spending the requests a reader is waiting on.
+
+> **The production interval is worth checking against your keys.** One desk every five minutes is
+> 288 requests/day per publisher, inside the 500/day Guardian and NYT developer cap and inside the
+> 350 their `INTERACTIVE_RESERVE` leaves background work — with every desk refreshed within 65
+> minutes. Sweeping all 13 every 30 minutes is **624/day**, over both. `rate(60 minutes)` lands at
+> 312 and stays inside them. For TheNewsAPI either figure is comfortably inside the ~1,500/day its
+> own budget leaves the sweep.
+>
+> The budgets are the backstop, not the schedule: past `budget − reserve` the sweep simply stops
+> for the day and the index goes stale, so the interval is still the thing to get right.
 
 ```bash
-# manual run — sweeps every section, for a cold index or an external scheduler
+# manual run — sweeps all 13 desks, for a cold index or an external scheduler
 docker compose exec backend python -m app.tasks.ingest_recent
 ```
 
-**Locally**, a tick refreshes **one section** and cycles through the six, because the request budget is the binding constraint: each section costs one request per publisher and developer keys cap at **500 requests/day**. One section every 5 minutes is 288/day — in budget, with every section current within 30 minutes. Sweeping all six on that interval would be 1,728/day, and the overage fails quietly (a rejected fetch is logged and returns empty, so the index just stops moving). Keep `(1440 / INGEST_INTERVAL_MINUTES) × INGEST_SECTIONS_PER_TICK` under 500 when tuning.
+**Locally**, a tick refreshes **one desk** and cycles through the 13, because the request budget is the binding constraint: each desk costs one request per publisher and developer keys cap at **500 requests/day**. One desk every 5 minutes is 288/day — in budget, with every desk current within 65 minutes. Sweeping all 13 on that interval would be 3,744/day, and the overage fails quietly (a rejected fetch is logged and returns empty, so the index just stops moving). Keep `(1440 / INGEST_INTERVAL_MINUTES) × INGEST_SECTIONS_PER_TICK` under 500 when tuning.
 
 Under multiple Gunicorn workers a short-lived **Redis lock** ensures exactly one worker performs each run, so publisher API usage isn't multiplied by the worker count. The rotation is derived from the clock rather than in-process state, so every worker resolves the same slice for a tick and a restart resumes the cycle in place. The lock fails open: a Redis outage still ingests rather than silently freezing the index. A failed run is logged and retried on the next tick.
 
@@ -388,8 +459,8 @@ Fargate replica would otherwise run its own copy, and cron work tied to long-run
 stops whenever the service scales down or redeploys. **EventBridge Scheduler** instead runs
 `python -m app.tasks.ingest_recent` as a one-shot Fargate task every 30 minutes, reusing the
 backend task definition with only the command overridden — same image, same secrets, same log
-group, so the job can never drift from the API it feeds. Because a direct invocation sweeps all
-six sections, the slower interval lands on the same daily budget. Setup in
+group, so the job can never drift from the API it feeds. A direct invocation sweeps all 13 desks,
+which is why the interval there is the one to tune — see the note above. Setup in
 [aws/ECS_PIPELINE.md](aws/ECS_PIPELINE.md).
 
 ## Interface
@@ -397,8 +468,21 @@ six sections, the slower interval lands on the same daily budget. Setup in
 **Three pages**, all responsive, in **light or dark theme** (follows your OS until you choose, then persists per browser):
 
 - **Chat** — streaming answers with a route badge, inline citation chips and a grouped source list
-- **Search** — 18 sections across three groups, date range, sort, per-publisher filter chips, real pagination (`Page 1 of 50 · 131,819 results`)
+- **Search** (the landing page) — ten newsroom desks, date range, sort, per-publisher filter chips, real pagination (`Page 1 of 50 · 131,819 results`). The desk list is deliberately short: eighteen entries across three groups gave Fashion and Books the same weight as Politics in a rail people scan for the news, and narrower subjects are ordinary search queries anyway
 - **Article intelligence** — AI summary, key points, entities, topics, important dates, related coverage, and "Ask AI about this article"
+
+**Sage travels with the reader.** Search is the landing page, so a question usually arrives while
+someone is looking at articles rather than at the chat. A floating panel answers beside the page
+instead of navigating away from it — the same `useChat` hook, the same streaming, the same
+citations as the full page, and the thread it starts is a normal conversation that "Open full
+view" carries to `/chat` by id. It is never rendered on `/chat`, where Sage is already the page.
+
+**Voice on both sides, both opt-in.** A mic button records a question and sends it to
+`/api/audio/transcribe`; answers can be read aloud through `/api/audio/speech`. Each is gated
+twice — by what the deployment can serve (`GET /api/capabilities`, so a control the backend cannot
+honour is never rendered) and by the reader's own preference, kept in their browser and off by
+default. Recording is also hidden outside a secure context, since `getUserMedia` cannot work over
+plain HTTP.
 
 Chats are scoped to an anonymous per-browser id (`X-Client-Id`), so one visitor never sees another's history; individual chats and the whole history can be deleted from the sidebar.
 
@@ -407,29 +491,31 @@ Chats are scoped to an anonymous per-browser id (`X-Client-Id`), so one visitor 
 | Endpoint | Description |
 |---|---|
 | `POST /api/chat` | agentic chat; `{"message", "conversation_id?", "article_id?", "stream": true}` → SSE (`state`, `route`, `status`, `token`, `sources`, `notice`, `done`, `error`) or JSON with `stream:false` |
-| `POST /api/intent` | routing decision only — no search, no answer, nothing written |
+| `POST /api/intent` | routing decision only — no search, no answer, nothing written. Operator-gated (`X-Admin-Key`) |
 | `GET /api/news/search` | multi-source search: `q, from_date, to_date, section, order_by, page, page_size, sources` |
 | `GET /api/news/sources` | active publishers, for the UI's filter |
 | `GET /api/news/article/{id}` | normalized article (index first, then publisher API) |
 | `GET /api/news/article/{id}/intelligence` | AI analysis + related coverage |
-| `POST /api/rag/retrieve` | hybrid retrieval with metadata filters |
+| `POST /api/rag/retrieve` | hybrid retrieval with metadata filters. Operator-gated, like every `/api/rag/*` route |
 | `POST /api/rag/ingest` | index by article ids and/or a search query |
 | `GET /api/conversations` · `GET /api/conversations/{id}` | chat history, scoped to `X-Client-Id` |
 | `DELETE /api/conversations/{id}` · `DELETE /api/conversations` | delete one chat / clear history |
+| `DELETE /api/conversations/{id}/article` | unpin the article a chat is anchored to, so it stops answering about that piece |
 | `POST /api/audio/speech` | audio for one stored answer; `{"conversation_id", "message_id"}` → `audio/mpeg`, `204` when nothing is speakable |
+| `POST /api/audio/transcribe` | text for one spoken question; the raw recording as the body → `{"text"}`, `204` when nothing was said |
 | `GET /api/capabilities` | which optional features this deployment can serve, so the UI hides what it cannot |
 | `GET /api/health` | database, vector extension, cache and each publisher |
 
 ## Testing
 
 ```bash
-cd backend && pytest -q     # 319 tests
-cd frontend && npm test     # 38 tests
+cd backend && pytest -q     # 472 tests
+cd frontend && npm test     # 114 tests, 20 files
 ```
 
-Covers the Guardian, NYT and TheNewsAPI adapters (mocked HTTP), the daily request budget, feed ranking and clustering, non-news exclusions, canonical categories, greeting short-circuit, chunking, dedup, RRF fusion, edition boost, source diversity, reranking, routing and resolution, date parsing and filtering, scope refusals, the scheduler's lock, security middleware, speech text preparation and playback ownership, API contracts, the SSE parser and citation components.
+Covers the Guardian, NYT and TheNewsAPI adapters (mocked HTTP), the daily request budget and its page-size clamp, feed ranking and clustering, non-news exclusions, canonical categories, greeting short-circuit, chunking, dedup, RRF fusion, edition boost, source diversity, reranking, routing and resolution, date parsing and filtering, scope refusals, the article pin, conversation continuity, the scheduler's lock, security middleware, abuse handling, speech text preparation, playback ownership and transcription, API contracts, and on the frontend the SSE parser, citation components, the Sage panel, the recorder and the voice controls.
 
-**RAG evaluation** — 20 questions against a running stack with real keys:
+**RAG evaluation** — 30 questions against a running stack with real keys:
 
 ```bash
 cd backend && python evaluation/run_eval.py --base-url http://localhost:8000
@@ -590,10 +676,13 @@ environment in Settings → Environments turns every deploy into an approval gat
 | Blank page, or "class does not exist" in dev | `tailwind.config.js` changed while the dev server was running — **restart Vite**. If it starts on `:5174`, an orphaned process still holds `:5173`; kill it. |
 | NYT missing from results | Key not licensed for Article Search (401). It falls back to Top Stories; enable "Article Search API" at developer.nytimes.com for archive search. |
 | `"nyt": "unavailable"` in `/api/health` | No `NYT_API_KEY`, or the key is rejected by every endpoint. |
-| TheNewsAPI missing from results | Daily budget spent (100/day on the free plan) — results fall back to stored articles and the source is listed in `degraded_sources`. Check the backend log for `budget exhausted`. |
+| One publisher missing from results | Its own daily budget is spent (`GUARDIAN_DAILY_BUDGET` / `NYT_DAILY_BUDGET` / `THENEWSAPI_DAILY_BUDGET`) — results fall back to stored articles and the source is listed in `degraded_sources`, while the other publishers carry on. Check the backend log for `budget exhausted`; the counters are `quota:{source}:{YYYY-MM-DD}` in Redis. |
+| Index stopped updating mid-day | The sweep hit `budget − reserve` for a publisher and stopped for the day. Either lengthen `INGEST_INTERVAL_MINUTES` / the EventBridge rate, or raise that publisher's budget if its plan allows more. |
 | Answer says evidence is insufficient | Index may be cold — run `python -m app.tasks.ingest_recent`, or wait for the next tick. |
 | Chat returns 500 | Missing `OPENAI_API_KEY`, or Postgres/pgvector not reachable — check `/api/health`. |
 | Frontend can't reach the API | `VITE_API_BASE_URL` mismatch, or the origin isn't in `FRONTEND_URL`/`EXTRA_CORS_ORIGINS`. |
+| No mic button, or no playback control | `GET /api/capabilities` reports the feature off — no `OPENAI_API_KEY`, or `STT_ENABLED`/`TTS_ENABLED` false. Recording additionally needs a secure context: over plain HTTP (not localhost) `getUserMedia` cannot work, so the button is hidden rather than rendered to fail. |
+| Answers never speak although voice is on | Autoplay was withheld for want of a user gesture — the panel says "tap once to enable automatic audio", and it clears permanently after the first playback. Restored history is deliberately silent. |
 | Chat stream cuts off in production | ALB idle timeout — raise it to 300 s. See [aws/ECS_PIPELINE.md](aws/ECS_PIPELINE.md). |
 | ECS tasks stop right after starting | Usually a missing SSM parameter or no route to ECR — check the stopped reason and `/ecs/guardian-backend`. |
 

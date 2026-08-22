@@ -177,6 +177,14 @@ class NYTSource(NewsSource):
     #: NYT allows ~5 requests/minute; keep a floor between calls
     MIN_INTERVAL_SECONDS = 1.2
 
+    @property
+    def daily_budget(self) -> int:
+        return get_settings().nyt_daily_budget
+
+    @property
+    def interactive_reserve(self) -> int:
+        return get_settings().nyt_interactive_reserve
+
     def __init__(self, api_key: str | None = None, client: httpx.AsyncClient | None = None):
         self.api_key = api_key if api_key is not None else get_settings().nyt_api_key
         self._client = client or httpx.AsyncClient(
@@ -204,6 +212,11 @@ class NYTSource(NewsSource):
         await self._client.aclose()
 
     async def _throttled_get(self, params: dict, url: str = SEARCH_URL) -> dict:
+        # Every caller checks its cache first, so reaching here means a real
+        # request against the day's 500 — including the health probe, which is
+        # why that one rides a 15-minute cache rather than asking each time.
+        await self.claim_request()
+
         params = {k: v for k, v in params.items() if v not in (None, "", [])}
         params["api-key"] = self.api_key
         async with self._lock:

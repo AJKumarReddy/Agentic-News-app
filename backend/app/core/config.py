@@ -11,24 +11,44 @@ class Settings(BaseSettings):
 
     guardian_api_key: str = ""
     guardian_page_size: int = 20
+    #: Requests per UTC day. Caps are per publisher, not shared: a developer
+    #: key allows 500 here, and one shared ceiling would have to be the
+    #: smallest plan in use. The arithmetic behind the reserve: the sweep costs
+    #: ~288/day (one desk every five minutes) or ~312 (all 13 desks hourly),
+    #: and the health probe ~96 more on its 15-minute cache. Background stops
+    #: at budget - reserve, so 350 covers the sweep either way and 150 stays
+    #: for readers — of which the probe is most, the rest being searches that
+    #: missed the 15-minute response cache.
+    guardian_daily_budget: int = 500
+    guardian_interactive_reserve: int = 150
 
     # New York Times (Article Search API). Empty key disables the source.
     nyt_api_key: str = ""
+    #: Same 500/day developer cap as the Guardian, counted separately — the
+    #: two plans have nothing to do with each other. NYT also meters per
+    #: minute (~5), which `MIN_INTERVAL_SECONDS` handles rather than this.
+    nyt_daily_budget: int = 500
+    nyt_interactive_reserve: int = 150
 
     # TheNewsAPI (api.thenewsapi.com) — an aggregator over thousands of
     # outlets rather than one masthead. Empty key disables the source.
     thenewsapi_api_key: str = ""
-    #: Articles per request. The free plan hard-caps this at 3 and rejects
-    #: anything larger, so the adapter clamps to whatever is set here.
-    thenewsapi_page_size: int = 3
-    #: Requests per UTC day. The free plan allows 100, and the scheduled
-    #: ingestion would spend that by mid-morning on its own (288 ticks/day),
-    #: leaving nothing for anyone actually using the site.
-    thenewsapi_daily_budget: int = 100
+    #: Articles per request. The plan hard-caps this and rejects anything
+    #: larger, so the adapter clamps to whatever is set here. Basic allows 25
+    #: (free 3, Standard 50, Pro 100) — set it to match the plan in use.
+    thenewsapi_page_size: int = 25
+    #: Requests per UTC day, counted against this publisher alone. The Basic
+    #: plan allows 2,500. The counter still exists at this size: the scheduler
+    #: ticks 288 times a day and every enabled section costs a request, so the
+    #: ceiling is what keeps a mis-tuned interval from spending the day's quota
+    #: before anyone searches.
+    thenewsapi_daily_budget: int = 2500
     #: Of that budget, how much is held back for requests a person is waiting
     #: on. Background ingestion stops at budget - reserve; interactive search
-    #: keeps going to the full budget.
-    thenewsapi_interactive_reserve: int = 40
+    #: keeps going to the full budget. Kept at the free plan's 40% share, which
+    #: leaves ingestion ~1,500 against the ~288 requests a day it actually
+    #: makes — headroom for a shorter interval or more sections per tick.
+    thenewsapi_interactive_reserve: int = 1000
 
     # Active publishers, in priority order
     enabled_sources: str = "guardian,nyt,thenewsapi"
