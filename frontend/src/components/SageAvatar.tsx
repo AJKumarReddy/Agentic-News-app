@@ -1,16 +1,22 @@
 /** Sage — the assistant's face.
  *
- *  A Midnight visor inside a light helmet, with ear cups either side and two
- *  arced eyes. Drawn rather than shipped as an image so it inherits the page's
- *  scale crisply and costs no request, and so the `thinking` state can just
- *  swap what is on the visor instead of loading a second asset.
+ *  A 3D render of Sage at her headset, cropped to head-and-shoulders and set
+ *  in the brand halo. Shipped from /public rather than drawn as SVG (which is
+ *  what this was) because the render's shading is the point — an inline path
+ *  cannot carry it, and at ~20KB the file costs one cached request.
+ *
+ *  The container clips to a circle, so the sliver of laptop in the crop's
+ *  bottom corner falls outside the frame. Sizing comes entirely from the
+ *  caller's `className`; the image fills whatever box that sets.
  *
  *  Two states, matching the brand sheet:
- *    idle     — curved eyes, the resting face
- *    thinking — three dots, the "Sage is researching…" indicator
+ *    idle     — the render alone
+ *    thinking — three dots over a scrim, the "Sage is researching…" indicator
  *
- *  The dots animate on the same `equalize`-style stagger the voice icon uses,
- *  and stop entirely under prefers-reduced-motion (see index.css).
+ *  The dots are sized in percentages so the indicator holds its proportions
+ *  from the 18px sidebar mark up to the 64px empty-state one. They animate on
+ *  the same `equalize`-style stagger the voice icon uses, and stop entirely
+ *  under prefers-reduced-motion (see index.css).
  */
 
 export type SageState = 'idle' | 'thinking';
@@ -23,34 +29,31 @@ export default function SageAvatar({
   className?: string;
 }) {
   return (
-    <svg viewBox="0 0 40 40" fill="none" className={className} role="img" aria-label="Sage">
-      {/* halo — the glow the sheet sets the face against */}
-      <circle cx="20" cy="20" r="19" className="fill-brand-100 dark:fill-brand-900/60" />
+    // `block`, not inline-flex: the SVG this replaced was display:block via
+    // preflight, and two call sites lean on that — ChatPage centres with
+    // mx-auto, MessageBubble toggles `hidden sm:block`. Tailwind emits
+    // `hidden` after `block`, so that pair still resolves the way it reads.
+    <span
+      className={`relative block overflow-hidden rounded-full bg-brand-100 dark:bg-brand-900/60 ${className}`}
+      role="img"
+      aria-label={state === 'thinking' ? 'Sage is researching' : 'Sage'}
+    >
+      <img
+        src="/sage-avatar.webp"
+        alt=""
+        aria-hidden="true"
+        draggable={false}
+        decoding="async"
+        className="h-full w-full object-cover"
+      />
 
-      {/* ear cups */}
-      <rect x="3" y="15" width="6" height="11" rx="3" className="fill-brand-500" />
-      <rect x="31" y="15" width="6" height="11" rx="3" className="fill-brand-500" />
-
-      {/* helmet, then the visor it holds */}
-      <rect x="7" y="7" width="26" height="26" rx="10" className="fill-white dark:fill-ink-200" />
-      <rect x="10" y="10" width="20" height="19" rx="7.5" className="fill-ink-900" />
-
-      {state === 'idle' ? (
-        // eyes: arcs opening downward, which is what reads as a smile rather
-        // than as two neutral slits
-        <path
-          d="M14.6 18.4c.7 1.6 2.4 1.6 3.1 0M22.3 18.4c.7 1.6 2.4 1.6 3.1 0"
-          className="stroke-accent-400"
-          strokeWidth="2.1"
-          strokeLinecap="round"
-        />
-      ) : (
-        <g className="fill-accent-400">
-          <circle cx="15" cy="19.5" r="1.7" className="animate-sage-dot" />
-          <circle cx="20" cy="19.5" r="1.7" className="animate-sage-dot [animation-delay:0.18s]" />
-          <circle cx="25" cy="19.5" r="1.7" className="animate-sage-dot [animation-delay:0.36s]" />
-        </g>
+      {state === 'thinking' && (
+        <span className="absolute inset-0 flex items-center justify-center gap-[8%] bg-ink-900/60">
+          <span className="h-[15%] w-[15%] animate-sage-dot rounded-full bg-accent-400" />
+          <span className="h-[15%] w-[15%] animate-sage-dot rounded-full bg-accent-400 [animation-delay:0.18s]" />
+          <span className="h-[15%] w-[15%] animate-sage-dot rounded-full bg-accent-400 [animation-delay:0.36s]" />
+        </span>
       )}
-    </svg>
+    </span>
   );
 }
