@@ -85,8 +85,15 @@ function MessageBubble({
           <span className="ml-0.5 inline-block h-4 w-[3px] animate-pulse rounded-full bg-brand-500 align-text-bottom" />
         )}
 
+        {/* The `relative` below is load-bearing. Tailwind's sr-only is
+            position:absolute with no offsets, so without a positioned ancestor
+            the live region's containing block is the page itself: it escapes
+            this scrolling thread and lands at its static position in *document*
+            coordinates, far below the fold. That stretched the document and
+            left a strip of blank space under the composer that the whole page
+            could scroll down into. Contained here, it cannot reach the page. */}
         {!message.streaming && onSpeak && message.id !== undefined && message.content && (
-          <div className="mt-3 flex items-center gap-2">
+          <div className="relative mt-3 flex items-center gap-2">
             <button
               onClick={() => onSpeak(message.id as number)}
               title={SPEECH_LABELS[speechState]}

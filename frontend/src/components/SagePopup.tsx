@@ -44,7 +44,7 @@ export default function SagePopup({
    *  control at all, while the same answers on /chat did. */
   voiceAvailable?: boolean;
 }) {
-  const { pathname } = useLocation();
+  const { pathname, state } = useLocation();
   // open/closed survives a refresh: a reader mid-conversation who reloads an
   // article should not have to reopen Sage and lose the thread
   const [open, setOpen] = useState(() => readStored('sage-open') === 'yes');
@@ -88,6 +88,7 @@ export default function SagePopup({
     stop();
     reset();
     spokenRef.current.clear();
+    wantedRef.current = null;
     writeStored('sage-conversation', '');
   }, [reset, stop, stopSpeech]);
 
@@ -117,6 +118,10 @@ export default function SagePopup({
   // from the restore path rather than from render timing, which cannot tell a
   // historical message from a new one.
   const spokenRef = useRef<Set<number>>(new Set());
+  // The thread the panel is meant to be showing. Two loads can be in flight at
+  // once — the mount restore and a "Side view" handover — and without this the
+  // slower one wins regardless of which the reader actually asked for.
+  const wantedRef = useRef<string | null>(null);
 
   // Autoplay: the newest answer, once, and only when the reader asked for it.
   useEffect(() => {
@@ -157,17 +162,16 @@ export default function SagePopup({
     if (conversationId) writeStored('sage-conversation', conversationId);
   }, [conversationId]);
 
-  // Restore it once, on mount. A stored id can be stale — the conversation may
-  // have been deleted from the rail — so a failed load clears the pointer
-  // rather than leaving a panel that fails the same way on every visit.
-  const restored = useRef(false);
-  useEffect(() => {
-    if (restored.current) return;
-    restored.current = true;
-    const saved = readStored('sage-conversation');
-    if (!saved) return;
-    getConversation(saved)
-      .then((detail) => {
+  /** Load a conversation into the panel. The mount-time restore and the
+   *  "Side view" handover from /chat both need exactly this, and both need the
+   *  backlog marked spoken first — adopting a thread is silent however long it
+   *  is and however it arrived. */
+  const adopt = useCallback(
+    (id: string) => {
+      wantedRef.current = id;
+      return getConversation(id).then((detail) => {
+        // superseded while the request was out — apply nothing
+        if (wantedRef.current !== id) return;
         setConversationId(detail.id);
         setMessages(
           detail.messages.map((m) => ({
@@ -177,12 +181,47 @@ export default function SagePopup({
             sources: m.sources || [],
           })),
         );
-        // marked before they can reach the autoplay effect, so restoring a
-        // conversation is silent however long it is
+        // marked before they can reach the autoplay effect
         detail.messages.forEach((m) => m.id !== undefined && spokenRef.current.add(m.id));
-      })
-      .catch(() => writeStored('sage-conversation', ''));
-  }, [setConversationId, setMessages]);
+      });
+    },
+    [setConversationId, setMessages],
+  );
+
+  // Restore it once, on mount. A stored id can be stale — the conversation may
+  // have been deleted from the rail — so a failed load clears the pointer
+  // rather than leaving a panel that fails the same way on every visit.
+  const restored = useRef(false);
+  useEffect(() => {
+    if (restored.current) return;
+    restored.current = true;
+    const saved = readStored('sage-conversation');
+    if (!saved) return;
+    adopt(saved).catch(() => writeStored('sage-conversation', ''));
+  }, [adopt]);
+
+  // "Side view" on /chat hands the thread back here — the return leg of
+  // "Full view". It cannot travel by the stored id: this component lives
+  // outside <Routes> and only renders null on /chat, so it never remounts and
+  // the restore above has already had its one turn by then. Worse, the id it
+  // stored is this panel's own, which goes stale the moment the reader opens a
+  // different chat from the rail. So the id travels as navigation state and is
+  // adopted live, which is what makes the handover land on the right thread.
+  const handedOver = useRef<unknown>(null);
+  useEffect(() => {
+    const handover = (state as { dockSage?: string } | null)?.dockSage;
+    if (!handover || handedOver.current === state) return;
+    handedOver.current = state;
+    // consumed — a later back/forward onto this entry should not reopen it
+    window.history.replaceState({}, '');
+    setOpen(true);
+    if (handover === conversationId) return;
+    // whatever the panel was holding is not what the reader asked to see
+    stopSpeech();
+    stop();
+    spokenRef.current.clear();
+    adopt(handover).catch(() => undefined);
+  }, [state, conversationId, adopt, stop, stopSpeech]);
 
   useEffect(() => writeStored('sage-width', String(width)), [width]);
 
