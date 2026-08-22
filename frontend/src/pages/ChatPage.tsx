@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef } from 'react';
-import { useLocation, useSearchParams } from 'react-router-dom';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import ArticleChip from '../components/ArticleChip';
 import ChatInput from '../components/ChatInput';
 import MessageBubble from '../components/MessageBubble';
@@ -61,6 +61,7 @@ export default function ChatPage({
   const speech = useSpeech();
   const [searchParams] = useSearchParams();
   const location = useLocation();
+  const navigate = useNavigate();
   const bottomRef = useRef<HTMLDivElement>(null);
   const notifiedRef = useRef<string | null>(null);
 
@@ -172,12 +173,53 @@ export default function ChatPage({
     return 'idle';
   };
 
+  /** The return leg of the panel's "Full view". Sends the reader back to the
+   *  articles with this thread reopened beside them, rather than leaving the
+   *  full page a one-way door. The id goes as navigation state because the
+   *  panel never unmounts and so cannot pick it up any other way — see the
+   *  handover effect in SagePopup. */
+  const toSideView = useCallback(() => {
+    stopSpeech();
+    navigate('/search', { state: { dockSage: conversationId } });
+  }, [conversationId, navigate, stopSpeech]);
+
   const empty = messages.length === 0;
   const hasAnswer = messages.some((m) => m.role === 'assistant' && !m.streaming && m.content);
   const showNudge = voice.available && !voice.nudged && hasAnswer;
 
   return (
-    <div className="flex h-full flex-col bg-brand-soft dark:bg-brand-soft-dark">
+    <div className="relative flex h-full flex-col bg-brand-soft dark:bg-brand-soft-dark">
+      {/* Floated into the corner rather than given a bar of its own: one
+          secondary control does not earn a strip across the top, and the
+          thread is centred in a max-w-3xl column, so the space beside it is
+          already empty. Tinted and blurred so it stays legible on a narrow
+          viewport, where an answer can pass underneath it. */}
+      {conversationId && (
+        <button
+          onClick={toSideView}
+          disabled={busy}
+          title={
+            busy ? 'Wait for the answer to finish' : 'Continue this conversation beside the articles'
+          }
+          className="absolute right-3 top-3 z-20 flex items-center gap-1.5 rounded-lg border border-ink-200/70 bg-white/80 px-2 py-1 text-[11px] font-medium text-ink-500 shadow-card backdrop-blur transition-colors hover:border-ink-300 hover:bg-white hover:text-ink-800 disabled:cursor-not-allowed disabled:opacity-40 dark:border-ink-700/70 dark:bg-ink-900/70 dark:text-ink-400 dark:hover:bg-ink-800 dark:hover:text-ink-100 sm:right-4 sm:top-4"
+        >
+          <svg
+            width="13"
+            height="13"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <rect x="3" y="4" width="18" height="16" rx="2" />
+            <path d="M15 4v16" />
+          </svg>
+          Side view
+        </button>
+      )}
       <div className="flex-1 overflow-y-auto overscroll-contain">
         <div className="mx-auto max-w-3xl px-3 py-6 sm:px-4 sm:py-8">
           {empty ? (
