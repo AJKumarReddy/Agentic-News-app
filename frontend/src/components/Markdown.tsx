@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { Source } from '../types';
+import { publisherName } from '../utils/publisher';
 
 /**
  * Renders assistant markdown and converts [n] citation markers into
@@ -31,7 +32,7 @@ export default function Markdown({ content, sources }: { content: string; source
               // so an NYT citation announced the wrong newsroom, and a reader
               // checking where a claim came from was told the publisher rather
               // than the piece.
-              title={`${source.source || (isWeb ? 'Web' : 'Publisher')}: ${source.headline}`}
+              title={`${publisherName(source.source) || (isWeb ? 'Web' : 'Publisher')}: ${source.headline}`}
             >
               {match[1]}
             </a>

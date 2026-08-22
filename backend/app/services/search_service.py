@@ -12,14 +12,49 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 
+from app.core.logging import log_event
 from app.guardian.models import GuardianSearchResult, NormalizedArticle
 from app.sources import enabled_sources
+from app.sources.categories import CATEGORIES
+from app.services.ranking import rank
+from app.sources.exclusions import exclusion_reason
 from app.sources.base import NewsSource, NewsSourceError, SourceResult
 
 logger = logging.getLogger(__name__)
 
 # publishers cap paging anyway; keep the UI's range sane
 MAX_PAGES = 50
+
+
+def drop_non_news(articles: list[NormalizedArticle]) -> list[NormalizedArticle]:
+    """Remove puzzles and paid placement before anything ranks or renders.
+
+    Runs here rather than in the UI because position is scarce: a sponsored
+    post that reaches the ranker competes on freshness like any other article
+    and can take a slot at the top of the page. What is dropped is logged with
+    the rule that fired — a filter nobody can see is a filter nobody can tune.
+    """
+    kept: list[NormalizedArticle] = []
+    dropped: dict[str, int] = {}
+    for article in articles:
+        reason = exclusion_reason(
+            headline=article.headline,
+            section=article.section,
+            url=article.url,
+            tags=tuple(article.tags or ()),
+        )
+        if reason:
+            dropped[reason] = dropped.get(reason, 0) + 1
+            continue
+        kept.append(article)
+    if dropped:
+        log_event(
+            logger,
+            "non_news_filtered",
+            dropped=sum(dropped.values()),
+            reasons=",".join(f"{k}={v}" for k, v in sorted(dropped.items())),
+        )
+    return kept
 
 
 def _dedupe(articles: list[NormalizedArticle]) -> list[NormalizedArticle]:
@@ -169,6 +204,7 @@ async def search_news(
                 page=page,
                 page_size=per_source,
             )
+            result.articles = drop_non_news(result.articles)
             return result, True
         except NewsSourceError as exc:
             logger.warning("source %s failed: %s", source.id, exc)
@@ -199,7 +235,34 @@ async def search_news(
         if stored.articles:
             degraded.append(source.id)
 
-    merged = merge([r.articles for r in results], order_by)[: page_size or 12]
+    merged = merge([r.articles for r in results], order_by)
+
+    # The browse feed is ranked; an explicit search is not.
+    #
+    # Someone who typed keywords, or asked for oldest-first, stated what they
+    # wanted and re-sorting it by our idea of importance would be overriding
+    # them. A bare browse states nothing, and `published_at DESC` is a poor
+    # default there — it puts a five-minute-old council item above an hour-old
+    # supreme court ruling. So ranking applies exactly where there is no
+    # instruction to respect.
+    #
+    # Category weight is dropped when a section was chosen: a reader who asked
+    # for Sport should not have sport demoted for being sport. Freshness,
+    # significance, authority and corroboration still apply — those are about
+    # the story, not about which desk filed it.
+    if not query.strip() and order_by == "newest":
+        flat = {c.id: 1.0 for c in CATEGORIES} if section else None
+        stories = rank(merged, category_weights=flat)
+        merged = [story.article for story in stories]
+        log_event(
+            logger,
+            "feed_ranked",
+            articles=len(merged),
+            clustered=sum(len(s.supporting) for s in stories),
+            section=section or "",
+        )
+
+    merged = merged[: page_size or 12]
 
     # Publishers paginate independently: we can keep serving pages while any
     # of them still has more, so the deepest source sets the page count.

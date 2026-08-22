@@ -1,6 +1,7 @@
 import type { Source } from '../types';
 import { formatArticleDate } from '../utils/date';
 import SourceChip from './SourceChip';
+import { publisherName } from '../utils/publisher';
 
 export default function SourceList({ sources }: { sources: Source[] }) {
   if (sources.length === 0) return null;
@@ -45,7 +46,7 @@ export default function SourceList({ sources }: { sources: Source[] }) {
                     name={source.source}
                     size="xs"
                   />
-                  {isWeb ? <span>{source.source}</span> : source.source && <span>{source.source}</span>}
+                  {source.source && <span>{publisherName(source.source)}</span>}
                   {source.published_at && <span>· {formatArticleDate(source.published_at)}</span>}
                   {source.author && <span>· {source.author}</span>}
                 </div>

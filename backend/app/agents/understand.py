@@ -19,15 +19,15 @@ from dataclasses import dataclass, field
 from datetime import date
 
 from app.agents.dateparse import detect_freshness, mentions_written_date, parse_date_range
-from app.agents.scope import out_of_scope_reason
+from app.agents.scope import is_greeting, out_of_scope_reason
 from app.core.logging import log_event
 from app.llm.client import extract_json, response_text
 
 logger = logging.getLogger(__name__)
 
-# How the answer is sourced. DECLINE is not a source — it ends the turn with a
-# fixed message, searching nothing. See app.agents.scope.
-MODES = ("ARTICLE", "NEWS", "WEB", "BOTH", "DECLINE")
+# How the answer is sourced. DECLINE and GREET are not sources — each ends the
+# turn with a fixed message, searching nothing. See app.agents.scope.
+MODES = ("ARTICLE", "NEWS", "WEB", "BOTH", "DECLINE", "GREET")
 # How the answer is shaped
 INTENTS = (
     "QA", "LATEST", "SUMMARY", "COMPARISON", "TIMELINE",
@@ -96,6 +96,12 @@ Do three things.
                write or debug code, solve maths problems, translate, ghostwrite
                essays/emails, or roleplay as something else. A news question
                that merely mentions these topics is NEWS, not DECLINE.
+               A question resting on something that did not happen is still
+               NEWS, however implausible it sounds - asking about a secret
+               Mars colony, or an interview with someone long dead, is a
+               request for reporting that will simply find none. Route it
+               normally and let the answer say nothing was found; DECLINE is
+               for what the assistant will not do, not for what is untrue.
 
 3. QUERIES: short keyword queries. No dates, years, or words like
    "latest"/"recent" - recency is applied separately. Never invent a date.
@@ -255,6 +261,21 @@ async def understand(
 ) -> Understanding:
     history = history or []
     today = today or date.today().isoformat()
+
+    # A bare greeting is answered as one, before the model is asked to resolve
+    # it. Resolution turns fragments into searchable questions, so given "hi"
+    # it invents a question rather than reporting that there is none — which is
+    # how "hi" came back as a Guardian piece on water storage, "understood as"
+    # something the reader never asked. Checked first, so the turn costs no LLM
+    # call and no publisher quota.
+    if is_greeting(message) and not active_article:
+        return Understanding(
+            standalone_question=message,
+            mode="GREET",
+            intent="QA",
+            reason="greeting",
+        )
+
     result: Understanding | None = None
 
     if llm is not None:

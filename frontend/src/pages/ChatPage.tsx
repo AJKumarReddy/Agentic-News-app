@@ -9,16 +9,28 @@ import { useChat } from '../hooks/useChat';
 import { useSpeech } from '../hooks/useSpeech';
 import type { useVoice } from '../hooks/useVoice';
 import type { SpeechState } from '../types';
-import { LogoMark } from '../components/Logo';
+import SageAvatar from '../components/SageAvatar';
 
 // each prompt gets its own accent so the grid reads as a palette, not a block
 const SUGGESTIONS = [
-  { label: 'Top US news today', hint: 'Latest across newsrooms', accent: 'from-brand-500 to-brand-700' },
-  { label: 'US politics this week', hint: 'What changed and when', accent: 'from-accent-400 to-accent-600' },
-  { label: 'Latest AI developments', hint: 'Technology coverage', accent: 'from-warm-400 to-warm-600' },
   {
-    label: 'Compare coverage of OpenAI and Anthropic',
-    hint: 'Side-by-side reporting',
+    label: "What are today's top stories?",
+    hint: 'A cited round-up across newsrooms',
+    accent: 'from-brand-500 to-brand-700',
+  },
+  {
+    label: 'Catch me up on the past week',
+    hint: 'What changed, and when',
+    accent: 'from-accent-400 to-accent-600',
+  },
+  {
+    label: 'How is AI regulation being covered?',
+    hint: 'Compare outlets side by side',
+    accent: 'from-warm-400 to-warm-600',
+  },
+  {
+    label: "What's the latest on the economy?",
+    hint: 'Follow an ongoing story',
     accent: 'from-brand-400 to-accent-500',
   },
 ];
@@ -170,18 +182,20 @@ export default function ChatPage({
         <div className="mx-auto max-w-3xl px-3 py-6 sm:px-4 sm:py-8">
           {empty ? (
             <div className="mt-6 animate-fade-up text-center sm:mt-12">
-              <div className="mx-auto mb-5 flex h-12 w-12 items-center justify-center rounded-xl border border-ink-200 bg-white text-brand-600 shadow-card dark:border-ink-700 dark:bg-ink-800">
-                <LogoMark className="h-6 w-6" />
-              </div>
-              <h1 className="font-serif text-[28px] font-bold leading-tight text-ink-900 dark:text-ink-50 sm:text-[34px]">
-                NewsLens
+              {/* Sage introduces itself here rather than the product doing it:
+                  the empty chat is the one place the assistant has a turn of
+                  its own, and a face makes the composer below it obvious. */}
+              <SageAvatar className="mx-auto mb-4 h-16 w-16" />
+              <h1 className="text-[26px] font-bold leading-tight tracking-tight text-ink-900 dark:text-ink-50 sm:text-[31px]">
+                Meet Sage
               </h1>
-              {/* deliberately names no publisher: the active set is whichever
-                  keys are configured, so an enumerated list goes stale the
-                  moment a source is added or a key is missing */}
-              <p className="mx-auto mt-2.5 max-w-md text-[15px] leading-relaxed text-ink-600 dark:text-ink-300">
-                Stay informed with answers grounded in trusted news reporting, with citations
-                supporting every claim.
+              {/* Sage is introduced, not Source: the product is the shell the
+                  reader is already inside, and this is the assistant's one
+                  turn to say what it does. Names no publisher — the active set
+                  is whichever keys are configured, so a list goes stale. */}
+              <p className="mx-auto mt-2.5 max-w-lg text-[15px] leading-relaxed text-ink-600 dark:text-ink-300">
+                Your AI research guide. Ask a question, and Sage will research the sources, connect
+                the evidence, and give you an answer you can verify.
               </p>
 
               <div className="mx-auto mt-7 grid max-w-2xl grid-cols-1 gap-2.5 sm:mt-9 sm:grid-cols-2">

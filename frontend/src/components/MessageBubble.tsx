@@ -1,6 +1,7 @@
 import { memo } from 'react';
 import Markdown from './Markdown';
 import RouteBadge from './RouteBadge';
+import SageAvatar from './SageAvatar';
 import SourceList from './SourceList';
 import VoiceIcon from './VoiceIcon';
 import type { ChatMessage, SpeechState } from '../types';
@@ -49,10 +50,16 @@ function MessageBubble({
   }
 
   return (
-    <div className="flex animate-fade-up justify-start">
+    <div className="flex animate-fade-up items-start justify-start gap-2.5">
+      {/* Sage answers, so Sage's face is on the answer. Hidden below sm, where
+          the avatar plus its gap costs more of a 360px screen than it earns. */}
+      <SageAvatar
+        state={message.streaming || message.status ? 'thinking' : 'idle'}
+        className="mt-0.5 hidden h-8 w-8 shrink-0 sm:block"
+      />
       {/* full width below sm: at 360px, 6% plus px-5 was ~40px of the screen
           spent on padding around an already narrow column of text */}
-      <div className="w-full max-w-full rounded-2xl rounded-bl-md border border-ink-200 dark:border-ink-700 bg-white dark:bg-ink-800 px-4 py-3.5 shadow-card sm:max-w-[94%] sm:px-5 sm:py-4">
+      <div className="w-full min-w-0 max-w-full rounded-2xl rounded-bl-md border border-ink-200 dark:border-ink-700 bg-white dark:bg-ink-800 px-4 py-3.5 shadow-card sm:px-5 sm:py-4">
         {message.status && (
           <div className="flex items-center gap-2 py-1 text-sm text-ink-500 dark:text-ink-400">
             <span className="relative flex h-2 w-2">
@@ -83,15 +90,19 @@ function MessageBubble({
             <button
               onClick={() => onSpeak(message.id as number)}
               title={SPEECH_LABELS[speechState]}
-              className={`inline-flex h-8 items-center gap-1.5 rounded-lg border px-2.5 text-[11px] font-medium transition-colors ${
+              // Was a 11px ghost outline in ink-400 — the same weight as a
+              // disabled control, so it read as decoration and people missed
+              // it. Now a filled tint at body size: still secondary to the
+              // answer, but plainly a button you can press.
+              className={`inline-flex h-9 items-center gap-2 rounded-lg border px-3 text-[13px] font-semibold transition-colors ${
                 speechState === 'speaking'
-                  ? 'border-accent-300 bg-accent-50 text-accent-600 dark:border-accent-500/40 dark:bg-accent-500/15 dark:text-accent-300'
+                  ? 'border-accent-400 bg-accent-100 text-accent-800 dark:border-accent-500/50 dark:bg-accent-500/25 dark:text-accent-100'
                   : speechState === 'error'
-                    ? 'border-ink-200 text-ink-300 dark:border-ink-700 dark:text-ink-600'
-                    : 'border-ink-200 text-ink-400 hover:border-accent-300 hover:text-accent-600 dark:border-ink-700 dark:text-ink-400 dark:hover:text-accent-300'
+                    ? 'border-ink-200 text-ink-400 dark:border-ink-700 dark:text-ink-500'
+                    : 'border-brand-200 bg-brand-50 text-brand-700 hover:border-brand-300 hover:bg-brand-100 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-200 dark:hover:bg-brand-500/20'
               }`}
             >
-              <VoiceIcon state={speechState} className="h-3.5 w-3.5 shrink-0" />
+              <VoiceIcon state={speechState} className="h-4 w-4 shrink-0" />
               {SPEECH_ACTIONS[speechState]}
             </button>
             <span className="sr-only" role="status" aria-live="polite">

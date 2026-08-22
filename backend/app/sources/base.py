@@ -42,6 +42,18 @@ class NewsSource(ABC):
     def enabled(self) -> bool:
         return True
 
+    @property
+    def bulk_efficient(self) -> bool:
+        """Whether this source is worth spending on background indexing.
+
+        A source that returns a handful of articles per request buys very
+        little index for each unit of a metered budget, and every request it
+        spends there is one a reader waiting on a search cannot have. Such a
+        source returns False and is used only on the interactive path, where
+        its breadth is what matters and the volume is not.
+        """
+        return True
+
     @abstractmethod
     async def search(
         self,

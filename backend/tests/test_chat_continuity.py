@@ -15,7 +15,10 @@ from types import SimpleNamespace
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
+from datetime import datetime, timezone
+
 from app.agents import graph as graph_module
+from app.rag.vector_store import ScoredChunk
 from app.agents.graph import HISTORY_TURN_CHARS, HISTORY_TURNS, _history_messages, build_agent_graph
 
 HISTORY = [
@@ -71,7 +74,26 @@ def captured(monkeypatch):
     seen: dict = {}
 
     async def retrieve_rag(session, query, **kwargs):
-        return []
+        # One chunk, so the turn reaches synthesis. With none, the graph now
+        # answers with the fixed no-evidence reply and never calls the model —
+        # correct behaviour, but it would leave nothing here to record.
+        return [
+            ScoredChunk(
+                chunk=SimpleNamespace(
+                    id=1,
+                    article_id="politics/2026/aug/01/story",
+                    headline="A story",
+                    url="https://www.theguardian.com/politics/2026/aug/01/story",
+                    published_at=datetime(2026, 8, 1, tzinfo=timezone.utc),
+                    section="politics",
+                    author="R",
+                    text="Evidence text for the answer.",
+                    source="The Guardian",
+                    source_id="guardian",
+                ),
+                score=0.9,
+            )
+        ]
 
     async def fetch_and_index(session, queries, **kwargs):
         return {"found": 0}

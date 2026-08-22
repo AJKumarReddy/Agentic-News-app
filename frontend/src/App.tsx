@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
+import SagePopup from './components/SagePopup';
 import Sidebar from './components/Sidebar';
 import { useCapabilities } from './hooks/useCapabilities';
 import { useTheme } from './hooks/useTheme';
@@ -60,6 +61,14 @@ export default function App() {
           <Route path="/article/*" element={<ArticlePage />} />
         </Routes>
       </main>
+      {/* outside <main> so neither the button nor its panel is clipped by a
+          page's own scroll container */}
+      <SagePopup
+        voiceInput={capabilities.stt}
+        voiceAvailable={voice.available}
+        autoRead={voice.voice === 'on'}
+        onConversationChange={() => setSidebarRefresh((n) => n + 1)}
+      />
     </div>
   );
 }

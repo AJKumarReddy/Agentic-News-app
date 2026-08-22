@@ -135,3 +135,49 @@ def out_of_scope_reason(*messages: str) -> str:
 
 def is_out_of_scope(*messages: str) -> bool:
     return bool(out_of_scope_reason(*messages))
+
+
+# Greetings and pleasantries. "hi" is not a news question, and treating it as
+# one produced the worst possible first impression: the reader typed one word
+# and got a Guardian piece about water storage, "understood as" a question they
+# never asked. Deterministic for the same reason the rules above are — the
+# resolver's job is to turn a fragment into a searchable question, so given
+# "hi" it will invent one rather than admit there is nothing there.
+#
+# Anchored and length-capped so it only ever catches a message that is *only* a
+# greeting: "hi, what happened in Gaza today" is a news question with a polite
+# opening and must search normally.
+_GREETING = re.compile(
+    r"^\s*(?:hi|hey+|hello+|yo|howdy|greetings|hiya|sup"
+    r"|good\s+(?:morning|afternoon|evening|day)"
+    r"|how(?:'?s|\s+is|\s+are)\s+(?:it\s+going|you|things)"
+    r"|what'?s\s+up|thanks|thank\s+you|thx|ta|cheers"
+    r"|ok(?:ay)?|cool|nice|great|bye|goodbye|see\s+ya)"
+    r"[\s,.!?]*(?:sage|there|mate|friend)?[\s,.!?]*$",
+    re.IGNORECASE,
+)
+
+#: Past this, a message is a real question however politely it opens.
+_GREETING_MAX_CHARS = 40
+
+GREETING_MESSAGE = (
+    "Hello — I'm Sage, your research guide here.\n\n"
+    "Ask me about a topic, person, event or organisation and I'll search the newsrooms, "
+    "compare what they reported, and give you an answer with citations you can check. "
+    "You can also ask what has happened today, or how outlets differ on a story."
+)
+
+
+def is_greeting(message: str) -> bool:
+    """Whether the message is *only* a greeting or pleasantry."""
+    if not message or len(message.strip()) > _GREETING_MAX_CHARS:
+        return False
+    return bool(_GREETING.match(message))
+
+
+NO_EVIDENCE_MESSAGE = (
+    "I could not find reporting on that in the journalism I have indexed.\n\n"
+    "That may mean the newsrooms I read have not covered it, that it is too "
+    "recent to be indexed yet, or that it did not happen. I would rather say so "
+    "than assemble an answer out of loosely related articles."
+)

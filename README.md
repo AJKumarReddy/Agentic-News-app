@@ -1,6 +1,6 @@
-# News AI
+# Source
 
-A production-ready AI news research assistant. It searches live reporting from **The Guardian**, **The New York Times** and **TheNewsAPI** (an aggregator over thousands of outlets), indexes it into a vector store, and answers natural-language questions with **grounded, citation-backed answers** — summaries, comparisons, timelines and follow-ups — falling back to the open web only when the newsrooms can't answer.
+*Ask. Research. Verify.* — a production-ready AI news research platform, with **Sage** as the research guide you talk to. Sage searches live reporting from **The Guardian**, **The New York Times** and **TheNewsAPI** (an aggregator over thousands of outlets), indexes it into a vector store, and answers natural-language questions with **grounded, citation-backed answers** — summaries, comparisons, timelines and follow-ups — falling back to the open web only when the newsrooms can't answer.
 
 **Repository:** https://github.com/AJKumarReddy/Agentic-News-app
 
@@ -15,7 +15,7 @@ React + TypeScript + Vite + Tailwind  →  FastAPI + LangGraph + pgvector  →  
 - [Architecture](#architecture) · [Design decisions](#key-design-decisions)
 - [Quick start](#quick-start-local) · [Configuration](#configuration)
 - [How it works](#how-it-works): [routing](#1-routing--the-understand-step) · [RAG](#2-the-rag-pipeline) · [citations](#3-citation-integrity)
-- [News sources](#news-sources) · [Scheduled ingestion](#scheduled-ingestion)
+- [The feed pipeline](#the-feed-pipeline) · [News sources](#news-sources) · [Scheduled ingestion](#scheduled-ingestion)
 - [Interface](#interface) · [API](#backend-api) · [Testing](#testing)
 - [Deployment](#deployment): [production on ECS Fargate](#production-github-actions--ecr--ecs-fargate) · [local Docker Compose](#local-docker-compose)
 - [Security checklist](#security-checklist-production) · [Troubleshooting](#troubleshooting)
@@ -42,6 +42,8 @@ flowchart TB
     SRC --> TNA[TheNewsAPI<br/>aggregator · daily budget]
     UN --> WEB[Tavily web search<br/>gated · cited separately]
 
+    SRC --> FEED[Feed pipeline<br/>exclude · cluster · rank]
+    FEED --> C
     SRC --> RAG[RAG Engine]
     RAG --> CH[Chunk 600–1000 tok]
     RAG --> EM[OpenAI embeddings]
@@ -72,6 +74,14 @@ flowchart TB
 | Sections | **A section is a filing decision, not a subject** | US political reporting lands in `us-news`, `politics`, `world` or `commentisfree` depending on the desk, so a section slug is widened to its subject neighbours before it reaches retrieval. Both sides are reduced to letters and digits first — the Guardian stores "US news", the NYT stores "U.S.", and we ask with "us-news". See `sources/sections.py`. |
 | Dedup | **Article ID + SHA-256 content hash** | An article is embedded once; re-embedding only when content or the embedding model changes. |
 | Streaming | **Server-Sent Events** | Route decision, pipeline status and answer tokens stream into the UI. |
+| Feed shape | **Canonical categories, one config** | Browsing by publisher slug meant `finance`, `money`, `economy` and `business` were four requests describing one subject, against providers that meter them. Five canonical categories now declare what each covers, what every provider calls it, and what share of the feed it starts with — in `sources/categories.py`, so weights are edited in one place rather than hunted through the codebase. Free text resolves through the same table, which is how "what's happening in AI?" reaches technology without the caller knowing any provider's vocabulary. |
+| Non-news | **Filtered before ranking, not before rendering** | Crosswords and sponsored posts are filtered during normalisation because position is scarce: an advert that reaches the ranker competes on freshness like any article and can take the top slot. Structured signals are trusted (a `sponsored` section is the publisher's own assertion); headline text is a backstop for puzzles only. Promotional *wording* is deliberately not matched on headlines — "Meta's advertising revenue fell" is news about advertising, and removing it would be a worse failure than keeping one unlabelled advert. A puzzle *instance* is told from an article *about* puzzles by its serial number or its label before a colon. See `sources/exclusions.py`. |
+| Ranking | **Importance × relevance × freshness, never `published_at DESC`** | Date-sorting puts a five-minute-old council item above an hour-old rate decision. `services/ranking.py` combines category weight, exponential time decay (six-hour half-life), significance terms, source authority, market impact and cross-source confirmation into one score. Every weight is a field on one dataclass; there are no magic numbers at the call sites. Freshness is strong but bounded — a genuinely major story outranks a fresher trivial one, and a stale story is actively penalised rather than merely faded. |
+| Duplicate coverage | **Cluster first, then score** | Six outlets covering one rate decision is one story, not six cards. Articles are grouped by headline-token overlap, the highest-authority member fronts the cluster, and the rest become supporting citations. Ordering matters: scoring before clustering would let six near-identical copies each earn a top slot and crowd out the rest of the day. Independent *outlets* are counted, not articles — a wire story under three mastheads of one group is one newsroom's work, so syndication cannot fake corroboration. |
+| Ingestion budget | **Index where the requests buy the most** | TheNewsAPI returns three articles per request against 100 a day; the Guardian returns fifty. Indexing from the former buys ~17× less per request, and every request spent there is denied to a reader waiting on a search — so it is excluded from the scheduled sweep by a `bulk_efficient` flag and used only on the interactive path, where its breadth is the point. The sweep covers every desk retrieval can widen into: an un-ingested desk makes that widening a filter over an empty set, which looks broader and finds less. |
+| Speech latency | **Segments in parallel, cached individually** | A long answer is split under the provider's input cap, and those segments used to be synthesised in a `for` loop — so a three-segment answer cost three round trips end to end and the reader waited for the sum. They are independent, so they now go concurrently (bounded by `TTS_MAX_CONCURRENCY`) and the wait is the slowest one. `gather` preserves order, which is what keeps the sentences in sequence. Each segment is cached on its own text as well as the whole answer, so a replay or a shared opening reuses work. |
+| Autoplay refusal | **Not an error** | A `play()` the browser withheld for want of a gesture used to land in the same state as a failed request, telling the reader "audio unavailable" and sending them to retry a button that would fail identically. It is now detected separately and answered with a one-time "tap once to enable automatic audio", which clears permanently once anything has played. |
+| Greetings | **Answered, not searched** | The understanding step's job is to resolve a fragment into a searchable question, so given "hi" it invents one — which is how a greeting returned a Guardian piece on water storage "understood as" a question nobody asked. `GREET` is now a mode alongside `DECLINE`: a deterministic check before the model runs, a fixed reply, no retrieval, no citation, and no cost. Anchored and length-capped, because the opposite failure is worse — "hi, what happened in Gaza today" must still search. |
 
 ## Repository layout
 
@@ -87,16 +97,17 @@ flowchart TB
 │   ├── app/
 │   │   ├── api/            chat · news · rag · health routers
 │   │   ├── agents/         graph, understand (resolve+route), dateparse, tools
-│   │   ├── sources/        NewsSource abstraction · Guardian · NYT · TheNewsAPI · quota · registry
+│   │   ├── sources/        NewsSource abstraction · Guardian · NYT · TheNewsAPI
+│   │   │                   categories (canonical + weights) · exclusions · quota · registry
 │   │   ├── guardian/       Guardian client, normalizer, shared models
 │   │   ├── websearch/      Tavily client + quality gates
 │   │   ├── rag/            chunker · embeddings · vector store · retrieval · reranker · ingestion
 │   │   ├── database/       SQLAlchemy models, session, repositories
 │   │   ├── llm/            chat model factory, prompts (grounding rules)
-│   │   ├── services/       chat orchestration/SSE, search, article intelligence, cache
+│   │   ├── services/       chat orchestration/SSE, search, ranking, article intelligence, cache
 │   │   ├── tasks/          scheduler, ingest_recent, edition backfill
 │   │   └── core/           config, JSON logging, security middleware
-│   ├── tests/              377 tests
+│   ├── tests/              433 tests
 │   └── evaluation/         20-question RAG evaluation harness
 ├── aws/                    ECS Fargate task definitions + production deployment guide
 ├── scripts/                health-check.sh · guardian_api_smoke.py
@@ -141,6 +152,7 @@ Full list in [.env.example](.env.example). The ones that matter:
 | `GUARDIAN_API_KEY` · `NYT_API_KEY` · `THENEWSAPI_API_KEY` | publishers; a source with no key is skipped, so the app runs on whichever keys exist |
 | `ENABLED_SOURCES` | active publishers in priority order (`guardian,nyt,thenewsapi`) |
 | `THENEWSAPI_PAGE_SIZE` · `THENEWSAPI_DAILY_BUDGET` · `THENEWSAPI_INTERACTIVE_RESERVE` | free-tier limits (3 per request, 100 per day) and the slice held back for interactive search |
+| `TTS_MAX_CONCURRENCY` | segments of one answer synthesised at once; the wait becomes the slowest segment rather than the sum |
 | `OPENAI_API_KEY` · `CHAT_MODEL` · `EMBEDDING_MODEL` | generation and embeddings |
 | `TAVILY_API_KEY` | optional web fallback; empty = newsroom-only, no web request ever made |
 | `WEB_SEARCH_THRESHOLD` | newsroom sources at or below this count trigger a web top-up |
@@ -221,12 +233,107 @@ This is the part most likely to mislead a reader, so it's enforced end to end:
 
 Answers can be read aloud through the OpenAI speech API. Two independent gates govern it: `TTS_ENABLED` decides whether the feature exists in a deployment, and each reader's own preference — kept in their browser and **off by default** — decides whether anything is ever spoken. Nothing is spent until someone opts in.
 
+**Always on** autoplays each newly completed answer, on the chat page and in the Sage panel alike. Three rules keep that from becoming noise:
+
+- **History never speaks.** Messages restored from a stored conversation are marked as already-spoken before they can reach the autoplay path. This is tracked explicitly rather than inferred from render timing, which cannot tell a historical message from a new one.
+- **One answer at a time.** A new question stops the previous answer; closing the panel stops playback rather than leaving it talking to a closed drawer.
+- **A blocked autoplay is not an error.** Browsers withhold audio until the page has a user gesture. That is answered with a one-time *"tap once to enable automatic audio"* rather than an error state, and it clears permanently once anything has played.
+
+Latency comes from the split: a long answer exceeds the provider's per-request input cap, so it is cut between sentences and each segment synthesised **concurrently** rather than in sequence. Segments are cached individually as well as as a whole, so a replay — or a second answer sharing an opening — reuses the work.
+
 - **Addressed by stored message, never by text.** `POST /api/audio/speech` takes a conversation id and a message id, and resolves them through the same ownership check that guards `GET /api/conversations/{id}`. Accepting raw text would make the endpoint an open relay for speech billed to our key.
 - **The prose is prepared first.** `app/core/text.py` strips citation markers, headings, bullets and link URLs, and drops tables whole — a listener hears "bracket one" as a defect, not as a source. That module also owns the citation regex the agent graph uses for history replay, so both agree on what a citation is.
 - **Its own rate-limit bucket.** With autoplay on, every turn is a chat request *and* an audio request; sharing the chat budget would halve usable chat throughput and the 429 would read as a broken chat.
 - **Cached on the text**, not the message, so the same answer reached from another conversation is free. Redis holds it for an hour — audio dwarfs the JSON around it under an LRU cap — and the browser caches the long tail.
 
 ---
+
+
+## The feed pipeline
+
+What reaches the homepage, and the order the stages run in. The order is not
+incidental — each stage exists because doing it later produces a specific,
+observed failure.
+
+```
+publishers (Guardian · NYT · TheNewsAPI)
+        │   fanned out concurrently; a failed source degrades to stored articles
+        ▼
+   normalize            one NormalizedArticle shape, whatever the provider
+        │
+        ▼
+   EXCLUDE              crosswords, puzzles, sponsored, affiliate
+        │               ── before ranking: position is scarce, and an advert
+        │                  that reaches the ranker competes on freshness
+        ▼
+   CLUSTER              one event = one card, other outlets become citations
+        │               ── before scoring: six copies would each earn a slot
+        ▼
+   SCORE                category + freshness + significance + authority
+        │                  + corroboration + market impact − staleness
+        ▼
+   order and render
+```
+
+### Why each stage sits where it does
+
+**Exclusions before ranking.** A sponsored post is fresh, well-formed and
+carries a plausible headline. Every signal the ranker reads says "promote
+this". Filtering at render time would leave it holding a priority slot that a
+real story should have had.
+
+**Clustering before scoring.** Scoring first means six near-identical reports
+of one rate decision each score highly on their own merits and take the top six
+positions, pushing the rest of the day off the page. Clustering first turns
+that into one strong story — and the fact that six independent newsrooms ran it
+becomes *evidence of importance* rather than repetition.
+
+**Independent outlets, not article count.** A wire story republished under
+three mastheads of one group is one newsroom's work. Counting articles would
+let syndication manufacture the corroboration signal, which is precisely the
+signal that is otherwise hardest to game: an outlet can write any headline it
+likes, but it cannot make five others cover the same event.
+
+**Freshness strong but bounded.** `published_at DESC` is the obvious sort and
+the wrong one — it puts a five-minute-old parish-council item above an
+hour-old supreme court ruling. Decay is exponential with a six-hour half-life
+(15 min → 0.97, 2 h → 0.79, 12 h → 0.25, 48 h → 0.004), which keeps a morning
+story alive through the working day while a two-day-old one is effectively
+gone. Past 72 hours an article is actively penalised, not merely faded: a
+rolling feed that still leads with last week is worse than a shorter one.
+
+**Undated is not fresh.** An article with no timestamp is scored as stale
+rather than as "now". The alternative lets every article missing a date lead
+the feed.
+
+**Market impact is not asserted.** It applies only to stories already
+categorised as business, and only from terms actually present in the headline
+and standfirst. Inventing market relevance for a sports story would be a lie
+the ranking tells itself.
+
+**The fifth category is deliberately broad.** "High-Impact Other" exists so the
+homepage cannot collapse into politics-finance-tech-sports. An earthquake, a
+court ruling, a public-health event or a scientific discovery reaches the top
+on its own significance, regardless of its category's normal allocation.
+
+### Category weights
+
+Starting shares, not quotas — a major story is expected to override them:
+
+| Category | Weight | Fetched first |
+|---|---|---|
+| Politics & Government | 32% | yes |
+| Business, Finance & Economy | 22% | yes |
+| Technology | 18% | yes |
+| High-Impact Other | 15% | no |
+| Sports | 13% | no |
+
+`default_weights()` is a function rather than a constant so a later
+personalisation layer can compose without touching the callers:
+
+```
+effective = default_weights() + user_interest + query_intent + breaking_event
+```
 
 ## News sources
 
@@ -320,7 +427,7 @@ cd backend && pytest -q     # 319 tests
 cd frontend && npm test     # 38 tests
 ```
 
-Covers the Guardian, NYT and TheNewsAPI adapters (mocked HTTP), the daily request budget, chunking, dedup, RRF fusion, edition boost, source diversity, reranking, routing and resolution, date parsing and filtering, scope refusals, the scheduler's lock, security middleware, speech text preparation and playback ownership, API contracts, the SSE parser and citation components.
+Covers the Guardian, NYT and TheNewsAPI adapters (mocked HTTP), the daily request budget, feed ranking and clustering, non-news exclusions, canonical categories, greeting short-circuit, chunking, dedup, RRF fusion, edition boost, source diversity, reranking, routing and resolution, date parsing and filtering, scope refusals, the scheduler's lock, security middleware, speech text preparation and playback ownership, API contracts, the SSE parser and citation components.
 
 **RAG evaluation** — 20 questions against a running stack with real keys:
 

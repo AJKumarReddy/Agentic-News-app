@@ -41,7 +41,15 @@ class Settings(BaseSettings):
     web_search_threshold: int = 2
 
     openai_api_key: str = ""
-    chat_model: str = "gpt-4o"
+    # One model for every turn is either too slow for "summarise this
+    # article" or too shallow for "why did this happen". The tier is chosen
+    # per turn in app/llm/routing.py; these name what each tier points at.
+    chat_model: str = "gpt-4o"  # general purpose, the default tier
+    chat_model_fast: str = "gpt-4o-mini"  # extraction, restatement, one article
+    # Defaults to the general model on purpose: the routing is real, but a
+    # deployment should opt into a reasoning model rather than be billed for
+    # one it never chose. Point this at an o-series model to enable it.
+    chat_model_reasoning: str = "gpt-4o"
     embedding_model: str = "text-embedding-3-small"
     embedding_dimensions: int = 1536
 
@@ -105,6 +113,10 @@ class Settings(BaseSettings):
     # article and search entries that keep the site up when a publisher is
     # unreachable. The browser cache carries the long tail instead.
     tts_cache_ttl_seconds: int = 3600
+    # Segments of one answer are synthesised concurrently rather than in a
+    # loop. Bounded so a long answer cannot open a dozen sockets at once or
+    # trip the provider's per-key rate limit.
+    tts_max_concurrency: int = 4
 
     # Speech-to-text for asking questions out loud. The mirror of the block
     # above, and gated the same way: `stt_enabled` decides whether the feature

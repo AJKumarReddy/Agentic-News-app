@@ -15,6 +15,7 @@ SSE event types sent to the frontend:
   error    {detail}
 """
 
+import asyncio
 import json
 import logging
 from collections.abc import AsyncGenerator
@@ -46,6 +47,29 @@ _NEXT_STAGE = {
     "WEB": "web_evidence",
     "DECLINE": "decline",
 }
+
+
+#: A fixed answer — a greeting, a refusal — has no model behind it, so there is
+#: nothing to stream: it arrives complete. Emitting it as one token made it
+#: appear instantly while every other answer types itself out, which reads as a
+#: different kind of thing happening rather than the same assistant replying.
+#: Replayed one token at a time, the way the synthesis model emits them.
+#: Longest gap between tokens. A model's own pace varies; this is the ceiling
+#: so a short message still types rather than appearing.
+_FIXED_TOKEN_DELAY = 0.05
+#: Total replay time, capped. This is cosmetic; a reader waiting on a one-line
+#: refusal should not be made to wait for the theatre of it.
+_FIXED_REPLAY_SECONDS = 2.5
+
+
+async def _replay_fixed_answer(text: str) -> AsyncGenerator[str, None]:
+    """Yield `text` one word at a time, reassembling to exactly the original."""
+    words = text.split(" ")
+    delay = min(_FIXED_TOKEN_DELAY, _FIXED_REPLAY_SECONDS / max(1, len(words)))
+    for index, word in enumerate(words):
+        # the separator the split consumed goes back on every word but the last
+        yield word + ("" if index == len(words) - 1 else " ")
+        await asyncio.sleep(delay)
 
 
 def _sse(event: str, data: dict[str, Any]) -> str:
@@ -269,7 +293,8 @@ async def chat_stream(
 
         answer = final_state.get("answer", "")
         if answer and not streamed_any:
-            yield _sse("token", {"delta": answer})
+            async for delta in _replay_fixed_answer(answer):
+                yield _sse("token", {"delta": delta})
 
         if final_state.get("notice"):
             yield _sse("notice", {"detail": final_state["notice"]})

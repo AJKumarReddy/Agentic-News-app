@@ -9,6 +9,7 @@ empty. There, a missing result still leaves an answer on the page; here,
 silence *is* the failure, and the reader deserves to be told.
 """
 
+import asyncio
 import hashlib
 import inspect
 import logging
@@ -112,18 +113,42 @@ async def synthesize(
         else {}
     )
 
+    async def render(segment: str) -> bytes:
+        """One segment, cached on its own text.
+
+        Per-segment keys as well as the whole-answer key above: a reader who
+        replays after the answer was extended, or two answers that share an
+        opening, reuse work instead of paying for it twice.
+        """
+        segment_key = cache_key(segment, voice=voice, model=model, fmt=fmt)
+        hit = await cache_get_bytes(segment_key)
+        if hit:
+            return hit
+        async with limiter:
+            response = await client.audio.speech.create(
+                model=model,
+                voice=voice,
+                input=segment,
+                response_format=fmt,
+                **extra,
+            )
+        rendered = await _response_bytes(response)
+        await cache_set_bytes(segment_key, rendered, ttl=settings.tts_cache_ttl_seconds)
+        return rendered
+
+    # Segments used to be synthesised in a for-loop, so a three-segment answer
+    # cost three round trips end to end and the reader waited for all of them.
+    # They are independent, so they go concurrently and the wait becomes the
+    # slowest one rather than the sum. Bounded, because the answer cap allows
+    # enough segments to matter and OpenAI rate-limits per key.
+    limiter = asyncio.Semaphore(settings.tts_max_concurrency)
     audio = bytearray()
     try:
         with Timer() as timer:
-            for segment in segments:
-                response = await client.audio.speech.create(
-                    model=model,
-                    voice=voice,
-                    input=segment,
-                    response_format=fmt,
-                    **extra,
-                )
-                audio.extend(await _response_bytes(response))
+            # gather preserves order, which is what keeps the sentences in the
+            # sequence they were written
+            for rendered in await asyncio.gather(*(render(s) for s in segments)):
+                audio.extend(rendered)
     except Exception as exc:  # noqa: BLE001 - surfaced to the caller as 502
         logger.warning("speech synthesis failed: %s", exc)
         raise SpeechError(str(exc)) from exc

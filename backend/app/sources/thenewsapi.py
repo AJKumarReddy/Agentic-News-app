@@ -151,7 +151,7 @@ class TheNewsAPISource(NewsSource):
         self.api_key = api_key if api_key is not None else settings.thenewsapi_api_key
         self._client = client or httpx.AsyncClient(
             timeout=httpx.Timeout(20.0, connect=10.0),
-            headers={"User-Agent": "news-ai/1.0"},
+            headers={"User-Agent": "source-news/1.0"},
         )
         self._lock = asyncio.Lock()
         self._last_call = 0.0
@@ -159,6 +159,15 @@ class TheNewsAPISource(NewsSource):
     @property
     def enabled(self) -> bool:
         return bool(self.api_key)
+
+    @property
+    def bulk_efficient(self) -> bool:
+        """No. The free plan returns three articles per request against a
+        hundred requests a day, so indexing from here buys ~17x less per
+        request than the Guardian's fifty. Kept off the scheduled sweep so the
+        whole budget stays available to searches someone is waiting on, where
+        this source earns its place on breadth rather than volume."""
+        return False
 
     def owns(self, article_id: str) -> bool:
         return article_id.startswith(ID_PREFIX)

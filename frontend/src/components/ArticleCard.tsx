@@ -62,7 +62,7 @@ export default function ArticleCard({ article }: { article: Article }) {
                 },
               })
             }
-            className="inline-flex min-h-[44px] items-center rounded-lg bg-brand-600 px-4 text-xs font-semibold text-white transition-colors hover:bg-brand-700 sm:min-h-0 sm:px-3 sm:py-1.5"
+            className="inline-flex min-h-[44px] items-center rounded-lg border border-brand-200 bg-brand-50 px-4 text-xs font-semibold text-brand-700 transition-colors hover:border-brand-300 hover:bg-brand-100 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-200 dark:hover:bg-brand-500/20 sm:min-h-0 sm:px-3 sm:py-1.5"
           >
             Ask AI
           </button>
