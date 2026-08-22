@@ -20,31 +20,24 @@ from app.core.config import get_settings
 from app.core.logging import configure_logging, log_event
 from app.database.session import SessionFactory, engine, init_db
 from app.services.search_service import search_news
+from app.sources import enabled_sources
+from app.sources.categories import ingest_sections
 from app.sources.quota import background_ingest
 from app.rag.ingestion import ingest_articles
 
 logger = logging.getLogger(__name__)
 
-# us-news first: the app favours the Guardian's US desk, so keep that
-# section warm in the index rather than relying on ranking alone.
+# Derived from the canonical categories rather than listed by hand. The old
+# list was eleven Guardian slugs, which indexed `business` and `money` as two
+# separate sweeps of one subject and spent a tick each cycle on
+# `commentisfree` — opinion, not reporting. One slug per category means the
+# rotation completes in under half the time, so everything in the index is
+# fresher, and the indexer covers exactly what the feed prioritises.
 #
-# Breadth matters more than depth per section. A question like "US politics
-# this week" is answered from us-news, politics, world *and* commentisfree —
-# leaving a desk out of this list means its reporting is not in the index at
-# all, and no amount of retrieval tuning recovers it.
-DEFAULT_SECTIONS = [
-    "us-news",
-    "politics",
-    "world",
-    "technology",
-    "business",
-    "environment",
-    "commentisfree",
-    "science",
-    "society",
-    "money",
-    "media",
-]
+# Breadth still matters within a category: retrieval widens a slug into its
+# subject neighbours (see app/sources/sections.py), so indexing `politics`
+# still answers questions filed under us-news and world.
+DEFAULT_SECTIONS = ingest_sections()
 
 #: Articles pulled per section per publisher per tick. A section can easily
 #: publish more than a dozen pieces in the window between two ticks, and
@@ -83,6 +76,17 @@ async def ingest_recent(
     # waiting on a search — see app.sources.quota. Set on this task's context,
     # so it does not leak into requests being served concurrently.
     background_ingest.set(True)
+
+    # Only sources that return volume per request. An aggregator capped at
+    # three articles a call would spend a metered budget here to add almost
+    # nothing to the index, and every one of those requests is denied to a
+    # reader waiting on a search. It still appears in search results — it is
+    # excluded from the *sweep*, not from the product.
+    bulk = [s.id for s in enabled_sources() if s.bulk_efficient]
+    if not bulk:
+        log_event(logger, "scheduled_ingest_skipped", reason="no bulk-efficient source")
+        return
+
     # fetch all sections concurrently; ingestion shares one session so it stays sequential
     results = await asyncio.gather(
         *(
@@ -91,6 +95,7 @@ async def ingest_recent(
                 from_date=from_date,
                 order_by="newest",
                 page_size=INGEST_PAGE_SIZE,
+                sources=bulk,
             )
             for section in sections
         )

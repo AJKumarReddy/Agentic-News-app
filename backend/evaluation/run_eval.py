@@ -20,6 +20,7 @@ Requires the backend to be running with real GUARDIAN_API_KEY / OPENAI_API_KEY.
 
 import argparse
 import asyncio
+import sys
 import json
 import re
 import time
@@ -41,12 +42,33 @@ DECLINE_MARKERS = ["news research assistant", "outside what i do", "outside what
 ATTEMPTED_TASK_MARKERS = ["def ", "class ", "return ", "```", "import ", "console.log"]
 
 
+# Windows consoles default to cp1252, which cannot encode the arrows and
+# box-drawing this report uses — a full evaluation run once completed and then
+# died printing its own results. Reconfigure rather than strip the characters:
+# losing the report is losing the run.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
+
 async def ask(client: httpx.AsyncClient, question: str, conversation_id: str | None = None) -> dict:
-    response = await client.post(
-        "/api/chat",
-        json={"message": question, "stream": False, "conversation_id": conversation_id},
-        timeout=180,
-    )
+    """One question, retrying past the chat rate limit.
+
+    The suite runs faster than `CHAT_RATE_LIMIT_PER_MINUTE` allows, so a third
+    of the first run failed with 429 and was scored as defects. Those were not
+    defects, and an evaluation that cannot distinguish "the assistant was
+    wrong" from "the harness went too fast" is worse than no evaluation.
+    """
+    for attempt in range(4):
+        response = await client.post(
+            "/api/chat",
+            json={"message": question, "stream": False, "conversation_id": conversation_id},
+            timeout=180,
+        )
+        if response.status_code != 429:
+            response.raise_for_status()
+            return response.json()
+        # the window is per minute, so back off in that order of magnitude
+        await asyncio.sleep(8 * (attempt + 1))
     response.raise_for_status()
     return response.json()
 
@@ -128,9 +150,21 @@ async def run(base_url: str) -> int:
                         issues.append("no sources returned")
                     if not has_inline_citations(answer) and not looks_insufficient(answer):
                         issues.append("no inline [n] citations")
+                    # This used to require every URL to be on theguardian.com,
+                    # written when the Guardian was the only source. With NYT
+                    # and an aggregator relaying hundreds of outlets, that
+                    # assertion fails on correct answers — it was reporting the
+                    # product's own growth as a defect.
+                    #
+                    # What the check was actually for is still worth keeping:
+                    # that citations point at real, absolute article URLs
+                    # rather than invented ones. A publisher allowlist cannot
+                    # be maintained against an aggregator; a well-formed URL
+                    # can be checked without one.
                     for source in sources:
-                        if not source.get("url", "").startswith("https://www.theguardian.com"):
-                            issues.append(f"non-Guardian URL: {source.get('url')}")
+                        url = source.get("url", "")
+                        if not url.startswith("https://") or len(url) < 20:
+                            issues.append(f"suspect citation URL: {url!r}")
 
                 if item.get("expect_insufficient"):
                     if sources and not looks_insufficient(answer):

@@ -8,32 +8,33 @@ export default {
   theme: {
     extend: {
       colors: {
-        // Primary — indigo/violet
+        // Primary — SOURCE blue. #2563EB is the brand Primary, so it sits
+        // at 600 where the app already reaches for its main action colour.
         brand: {
-          50: '#f3f2ff',
-          100: '#e7e4ff',
-          200: '#d0caff',
-          300: '#b0a5fc',
-          400: '#8f7bf7',
-          500: '#7355ee',
-          600: '#5f3fd8',
-          700: '#4d31b0',
-          800: '#3a2686',
-          900: '#281a5c',
-          950: '#180f38',
+          50: '#eff6ff',
+          100: '#dbeafe',
+          200: '#bfdbfe',
+          300: '#93c5fd',
+          400: '#60a5fa',
+          500: '#3b82f6',
+          600: '#2563eb',
+          700: '#1d4ed8',
+          800: '#1e40af',
+          900: '#1e3a8a',
+          950: '#172554',
         },
-        // Secondary — teal, for supporting actions and highlights
+        // Secondary — SOURCE cyan (#06B6D4 at 500), for supporting accents
         accent: {
-          50: '#eefdfa',
-          100: '#d3f8f1',
-          200: '#a9efe5',
-          300: '#71e0d3',
-          400: '#38c8bb',
-          500: '#18aca1',
-          600: '#0e8a83',
-          700: '#106e6a',
-          800: '#125856',
-          900: '#134949',
+          50: '#ecfeff',
+          100: '#cffafe',
+          200: '#a5f3fc',
+          300: '#67e8f9',
+          400: '#22d3ee',
+          500: '#06b6d4',
+          600: '#0891b2',
+          700: '#0e7490',
+          800: '#155e75',
+          900: '#164e63',
         },
         // Warm accent — used for web sources and emphasis
         warm: {
@@ -51,24 +52,26 @@ export default {
         // per-publisher accents
         guardian: '#0b5394',
         nyt: '#1a1a1a',
+        // Neutrals, tilted navy so the dark surfaces land on Midnight
+        // rather than the old violet-grey. 50 is the sheet's Background.
         ink: {
-          50: '#f8f9fc',
-          100: '#f1f2f8',
-          200: '#e4e6f0',
-          300: '#cbcfe0',
-          400: '#979dba',
-          500: '#6b7192',
-          600: '#4c5273',
-          700: '#363b57',
-          800: '#23273c',
-          900: '#151827',
+          50: '#f8fafc',
+          100: '#f1f5f9',
+          200: '#e2e8f0',
+          300: '#cbd5e1',
+          400: '#94a3b8',
+          500: '#64748b',
+          600: '#475569',
+          700: '#1e293b',
+          800: '#122145',
+          900: '#0b1b44',
         },
       },
       backgroundImage: {
-        'brand-gradient': 'linear-gradient(135deg, #5f3fd8 0%, #7355ee 45%, #18aca1 100%)',
-        'brand-soft': 'linear-gradient(180deg, #fbfbfd 0%, #f6f7fa 100%)',
-        'sidebar-gradient': 'linear-gradient(175deg, #281a5c 0%, #180f38 55%, #134949 100%)',
-        'brand-soft-dark': 'linear-gradient(135deg, #14121f 0%, #101a1e 100%)',
+        'brand-gradient': 'linear-gradient(135deg, #2563eb 0%, #3b82f6 45%, #06b6d4 100%)',
+        'brand-soft': 'linear-gradient(180deg, #ffffff 0%, #f1f5f9 100%)',
+        'sidebar-gradient': 'linear-gradient(175deg, #12275e 0%, #0b1b44 55%, #0e7490 100%)',
+        'brand-soft-dark': 'linear-gradient(135deg, #0b1b44 0%, #08182f 100%)',
       },
       fontFamily: {
         serif: ['Georgia', 'Times New Roman', 'serif'],
@@ -77,7 +80,7 @@ export default {
       boxShadow: {
         card: '0 1px 2px rgba(21, 24, 39, 0.04), 0 4px 16px rgba(21, 24, 39, 0.06)',
         lift: '0 2px 4px rgba(21, 24, 39, 0.06), 0 10px 24px rgba(21, 24, 39, 0.10)',
-        glow: '0 8px 28px rgba(95, 63, 216, 0.28)',
+        glow: '0 8px 28px rgba(37, 99, 235, 0.28)',
       },
       keyframes: {
         'fade-up': {
@@ -92,6 +95,10 @@ export default {
           '0%': { transform: 'translateX(-100%)' },
           '100%': { transform: 'translateX(0)' },
         },
+        'slide-in-right': {
+          '0%': { transform: 'translateX(100%)' },
+          '100%': { transform: 'translateX(0)' },
+        },
         'fade-in': {
           '0%': { opacity: '0' },
           '100%': { opacity: '1' },
@@ -102,13 +109,21 @@ export default {
           '0%, 100%': { transform: 'scaleY(0.3)' },
           '50%': { transform: 'scaleY(1)' },
         },
+        // Sage's thinking dots: opacity only, so the dots stay put rather than
+        // jittering the visor they sit on
+        'sage-dot': {
+          '0%, 100%': { opacity: '0.25' },
+          '50%': { opacity: '1' },
+        },
       },
       animation: {
         'fade-up': 'fade-up 0.25s ease-out',
         shimmer: 'shimmer 1.4s linear infinite',
         'slide-in-left': 'slide-in-left 0.22s cubic-bezier(0.32, 0.72, 0, 1)',
+        'slide-in-right': 'slide-in-right 0.22s cubic-bezier(0.32, 0.72, 0, 1)',
         'fade-in': 'fade-in 0.2s ease-out',
         equalize: 'equalize 0.85s ease-in-out infinite',
+        'sage-dot': 'sage-dot 1.1s ease-in-out infinite',
       },
     },
   },

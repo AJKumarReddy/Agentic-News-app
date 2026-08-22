@@ -6,6 +6,7 @@ import { getArticleIntelligence } from '../services/api';
 import type { Article, ArticleIntelligence } from '../types';
 import { formatArticleDate } from '../utils/date';
 import SourceChip from '../components/SourceChip';
+import { publisherName } from '../utils/publisher';
 
 export default function ArticlePage() {
   // splat param: Guardian IDs like technology/2026/aug/07/story contain slashes
@@ -54,7 +55,7 @@ export default function ArticlePage() {
     // article we can list is not always one we can open. Show what we have and
     // send the reader to the original rather than to a homepage.
     const isNyt = decodeURIComponent(articleId ?? '').startsWith('nyt://');
-    const publisher = passed?.source || (isNyt ? 'The New York Times' : 'the publisher');
+    const publisher = publisherName(passed?.source) || (isNyt ? 'The New York Times' : 'the publisher');
     const published = formatArticleDate(passed?.published_at, 'full');
 
     return (
@@ -250,7 +251,7 @@ export default function ArticlePage() {
             <h2 className="font-serif text-xl font-bold text-brand-900 dark:text-brand-200">
               Related coverage
             </h2>
-            <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="mt-3 grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(min(17rem,100%),1fr))]">
               {related.map((r) => (
                 <ArticleCard key={r.article_id} article={r} />
               ))}

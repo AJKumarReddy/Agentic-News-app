@@ -29,7 +29,7 @@ async def lifespan(app: FastAPI):
     configure_logging(settings.log_level)
     await init_db()
     ingestion_task = scheduler.start(app)
-    logger.info("News AI backend started (%s)", settings.environment)
+    logger.info("Source backend started (%s)", settings.environment)
     yield
     await scheduler.stop(ingestion_task)
     await close_all()
@@ -39,7 +39,7 @@ async def lifespan(app: FastAPI):
 def create_app() -> FastAPI:
     settings = get_settings()
     app = FastAPI(
-        title="News AI",
+        title="Source",
         version="1.0.0",
         lifespan=lifespan,
         docs_url=None if settings.is_production else "/docs",

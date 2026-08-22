@@ -28,17 +28,19 @@ from langgraph.graph import END, StateGraph
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents import tools
-from app.agents.scope import DECLINE_MESSAGE
+from app.agents.scope import DECLINE_MESSAGE, GREETING_MESSAGE, NO_EVIDENCE_MESSAGE
 from app.agents.state import AgentState
 from app.agents.understand import understand
 from app.core.config import get_settings
 from app.core.logging import log_event
 from app.core.text import CITATION_MARKER
 from app.llm.client import get_chat_model, response_text
+from app.llm.routing import classify, max_tokens_for, model_for
 from app.llm.prompts import SYSTEM_PROMPT, build_synthesis_prompt
 from app.rag.vector_store import RetrievalFilters, ScoredChunk
 from app.sources.sections import related_sections
 from app.websearch.client import requested_domains, within_range
+from app.sources.publishers import publisher_name
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +56,21 @@ WEB_DEFAULT_DAYS = 30
 # returns no web evidence — publisher retrieval still answers, and a result
 # outside the requested range is worse than one fewer source.
 WEB_MAX_DAYS = 365
+
+
+def _strip_markers(answer: str, markers: set[int]) -> str:
+    """Remove citation markers that have no source behind them.
+
+    Leaves the sentence otherwise intact and tidies the space the marker
+    occupied, so " ... rates [7]." does not become " ... rates ." — the reader
+    should not be able to tell a marker was removed.
+    """
+    for n in markers:
+        answer = answer.replace(f"[{n}]", "")
+    answer = re.sub(r"[ \t]{2,}", " ", answer)
+    # pull punctuation back onto the word the marker sat after, so
+    # "rates [7]." does not become "rates ."
+    return re.sub(r"[ \t]+([.,;:!?])", r"\1", answer)
 
 
 # ── evidence assembly ────────────────────────────────────────────────
@@ -142,7 +159,13 @@ def _web_to_evidence(results, evidence: list[dict], sources: list[dict]):
 
 
 def _format_entry(item: dict, header: str = "") -> str:
-    origin = item.get("source") or ("web" if item.get("type") == "web" else "The Guardian")
+    # The model reads this label back to the user almost verbatim, so it names
+    # the newsroom rather than the domain the aggregator reports it by:
+    # labelling a chunk "foxnews.com" produced answers citing "foxnews.com".
+    # The article keeps the domain; only the label the model sees is mapped.
+    origin = publisher_name(item.get("source")) or (
+        "web" if item.get("type") == "web" else "The Guardian"
+    )
     published = (item.get("published_at") or "")[:10]
     return f"{header}[{item['n']}] {item['headline']} ({published}, {origin})\n{item['text']}\n"
 
@@ -334,6 +357,43 @@ def build_agent_graph(session: AsyncSession, understanding_llm=None, synthesis_l
             "evidence": [],
             "sources": [],
             **_advance(state, "decline"),
+        }
+
+    async def greet_node(state: AgentState) -> dict[str, Any]:
+        """A greeting: say hello and stop.
+
+        Same shape as decline_node and for the same reason — a fixed message,
+        no retrieval, and an empty source list so the UI cannot imply this text
+        came from journalism. It also costs nothing: no model call, no
+        publisher request against a metered budget.
+        """
+        log_event(logger, "greeted", user_query=state["query"][:80])
+        return {
+            "answer": GREETING_MESSAGE,
+            "evidence": [],
+            "sources": [],
+            **_advance(state, "greet"),
+        }
+
+    async def no_evidence_node(state: AgentState) -> dict[str, Any]:
+        """Retrieval came back with nothing. Say so, and stop.
+
+        The third fixed-reply terminal, after decline and greet, and here for
+        the same reason: some turns should not reach the synthesis model at
+        all. Given no evidence the model will still write something —
+        assembling a plausible answer out of whatever loosely related articles
+        the search happened to return — which is how a question about an event
+        that never occurred came back with citations attached.
+
+        Distinct from a *thin* result, which still synthesises. This fires only
+        when there is nothing whatsoever to reason from.
+        """
+        log_event(logger, "no_evidence", user_query=state["query"][:150], mode=state.get("mode"))
+        return {
+            "answer": NO_EVIDENCE_MESSAGE,
+            "evidence": [],
+            "sources": [],
+            **_advance(state, "no_evidence"),
         }
 
     async def article_evidence_node(state: AgentState) -> dict[str, Any]:
@@ -554,24 +614,63 @@ def build_agent_graph(session: AsyncSession, understanding_llm=None, synthesis_l
             # only a stated period is a constraint worth naming to the model
             date_window=_window_label(state) if state.get("date_explicit") else "",
         )
-        llm = synthesis_llm or get_chat_model(temperature=0.2, streaming=True, max_tokens=1800)
+        # Chosen from what understanding already worked out plus how much
+        # evidence came back — no extra model call to decide.
+        tier = classify(
+            intent=state.get("intent", "QA"),
+            mode=state.get("mode", "NEWS"),
+            question=state.get("standalone_question") or state["query"],
+            source_count=len(state.get("sources", [])),
+        )
+        llm = synthesis_llm or get_chat_model(
+            temperature=0.2,
+            streaming=True,
+            max_tokens=max_tokens_for(tier),
+            model=model_for(tier),
+        )
         prior = _history_messages(state.get("history", []))
         answer = response_text(
             await llm.ainvoke(
                 [SystemMessage(content=SYSTEM_PROMPT), *prior, HumanMessage(content=prompt)]
             )
         )
-        cited = {int(n) for n in re.findall(r"\[(\d+)\]", answer)}
         sources = state.get("sources", [])
-        # Article mode cites once by design, so keep the article either way
+        available = {s["n"] for s in sources}
+        cited = {int(n) for n in re.findall(r"\[(\d+)\]", answer)}
+
+        # A marker pointing at nothing is worse than no marker: the reader
+        # clicks a number and finds no source behind it. Costs no model call to
+        # check, and the alternative is trusting the model's arithmetic over a
+        # set we already have.
+        phantom = cited - available
+        if phantom:
+            answer = _strip_markers(answer, phantom)
+            cited -= phantom
+            log_event(
+                logger,
+                "phantom_citations_stripped",
+                markers=",".join(str(n) for n in sorted(phantom)),
+            )
+
         kept = [s for s in sources if s["n"] in cited]
-        if not kept:
-            kept = sources[:1] if state.get("mode") == "ARTICLE" else sources[:3]
+        if not kept and state.get("mode") == "ARTICLE":
+            # ARTICLE mode answers about one article the reader is already
+            # looking at, and conventionally refers to it without a marker.
+            # Keeping it states nothing the answer did not.
+            kept = sources[:1]
+        # Deliberately no other fallback. This used to attach the top three
+        # sources to an answer that cited none — which is exactly what an
+        # honest answer looks like when the evidence does not support the
+        # question. The evaluation caught the result: asked about an invented
+        # event, the assistant returned citations for it. An app whose promise
+        # is "every claim cited" must not manufacture that guarantee; an
+        # uncited answer shows no sources.
         log_event(
             logger,
             "agent_answer",
             mode=state.get("mode"),
             intent=state.get("intent"),
+            model_tier=tier.value,
             agent_tools_called=state.get("steps", []),
             sources=len(kept),
         )
@@ -584,6 +683,7 @@ def build_agent_graph(session: AsyncSession, understanding_llm=None, synthesis_l
             "NEWS": "news_evidence",
             "BOTH": "news_evidence",
             "DECLINE": "decline",
+            "GREET": "greet",
         }.get(state.get("mode", "NEWS"), "news_evidence")
 
     def route_after_article(state: AgentState) -> str:
@@ -597,7 +697,7 @@ def build_agent_graph(session: AsyncSession, understanding_llm=None, synthesis_l
 
     def route_after_news(state: AgentState) -> str:
         if not settings.tavily_api_key:
-            return "synthesize"
+            return "synthesize" if state.get("evidence") else "no_evidence"
         if state.get("mode") == "BOTH":
             return "web_evidence"
         # top up only when Guardian retrieval came back too thin to answer on
@@ -608,6 +708,8 @@ def build_agent_graph(session: AsyncSession, understanding_llm=None, synthesis_l
     graph = StateGraph(AgentState)
     graph.add_node("understand", understand_node)
     graph.add_node("decline", decline_node)
+    graph.add_node("greet", greet_node)
+    graph.add_node("no_evidence", no_evidence_node)
     graph.add_node("article_evidence", article_evidence_node)
     graph.add_node("news_evidence", news_evidence_node)
     graph.add_node("web_evidence", web_evidence_node)
@@ -622,18 +724,33 @@ def build_agent_graph(session: AsyncSession, understanding_llm=None, synthesis_l
             "news_evidence": "news_evidence",
             "web_evidence": "web_evidence",
             "decline": "decline",
+            "greet": "greet",
         },
     )
     graph.add_edge("decline", END)
+    graph.add_edge("greet", END)
+    graph.add_edge("no_evidence", END)
     graph.add_conditional_edges(
         "article_evidence",
         route_after_article,
         {"news_evidence": "news_evidence", "synthesize": "synthesize"},
     )
     graph.add_conditional_edges(
-        "news_evidence", route_after_news, {"web_evidence": "web_evidence", "synthesize": "synthesize"}
+        "news_evidence",
+        route_after_news,
+        {
+            "web_evidence": "web_evidence",
+            "synthesize": "synthesize",
+            "no_evidence": "no_evidence",
+        },
     )
-    graph.add_edge("web_evidence", "synthesize")
+    graph.add_conditional_edges(
+        "web_evidence",
+        # web is the last chance to find anything; with nothing after it, an
+        # empty evidence set means there is nothing to synthesise from
+        lambda state: "synthesize" if state.get("evidence") else "no_evidence",
+        {"synthesize": "synthesize", "no_evidence": "no_evidence"},
+    )
     graph.add_edge("synthesize", END)
     return graph.compile()
 

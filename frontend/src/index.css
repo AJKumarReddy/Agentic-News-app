@@ -21,7 +21,7 @@ body,
 
 html {
   /* the default grey flash on tap is heavier than our own active states */
-  -webkit-tap-highlight-color: rgba(115, 85, 238, 0.14);
+  -webkit-tap-highlight-color: rgba(37, 99, 235, 0.14);
 }
 
 body {
@@ -161,4 +161,12 @@ body {
     theme('colors.ink.600') 200px,
     theme('colors.ink.700') 400px
   );
+}
+
+/* Sage's thinking dots hold steady for anyone who asked for less motion. */
+@media (prefers-reduced-motion: reduce) {
+  .animate-sage-dot {
+    animation: none;
+    opacity: 0.8;
+  }
 }

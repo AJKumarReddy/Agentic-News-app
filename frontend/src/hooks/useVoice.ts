@@ -1,26 +1,14 @@
 import { useCallback, useState } from 'react';
+import { readStored, writeStored } from '../utils/storage';
 
 export type VoicePref = 'on' | 'off';
 
-const STORAGE_KEY = 'news-ai-voice';
-const NUDGE_KEY = 'news-ai-voice-nudged';
+const STORAGE_KEY = 'voice';
+const NUDGE_KEY = 'voice-nudged';
 
-function read(key: string): string | null {
-  try {
-    return localStorage.getItem(key);
-  } catch {
-    // private-mode Safari throws on access; a preference is never worth a crash
-    return null;
-  }
-}
-
-function write(key: string, value: string) {
-  try {
-    localStorage.setItem(key, value);
-  } catch {
-    // the choice still applies for this session, it just will not survive
-  }
-}
+// the try/catch and the legacy-key migration both live in utils/storage
+const read = readStored;
+const write = writeStored;
 
 function initialVoice(): VoicePref {
   return read(STORAGE_KEY) === 'on' ? 'on' : 'off';

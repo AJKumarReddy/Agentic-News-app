@@ -1,35 +1,42 @@
-/** Wordmark for the app: a lens over column rules.
+import { useId } from 'react';
+
+/** Source wordmark and its "S" swirl.
  *
- *  Both halves of the name in one shape — the circle reads as a lens, the
- *  ruled lines inside it as newsprint. Kept to a single stroked path set for
- *  the same reason the previous broadsheet glyph was: two overlapping shapes
- *  (a loupe laid across a newspaper) turn to mush at the 20px the mobile bar
- *  renders it at.
+ *  The mark is one stroked S with round caps — two arcs turning opposite ways,
+ *  which is what gives the brand sheet's swirl its motion. Stroked rather than
+ *  filled so a single path holds up at the 20px the mobile bar renders it at;
+ *  a filled swirl with a tapering tail loses the taper and reads as a blob.
  *
- *  Two rules, not three, and of different lengths. Three at this diameter
- *  merged into a single bar at 20px and the whole mark read as a browser
- *  zoom-out button; equal-length rules read as an equals sign. Ragged lengths
- *  with a wide gap are what make it read as a column of type.
+ *  It paints itself in the brand gradient rather than currentColor, because
+ *  the sheet's S is the same blue on the white tile and the Midnight one.
+ *
+ *  The gradient id comes from useId, one per instance. A shared constant id
+ *  looked tidier and rendered nothing: the mobile top bar sits before the
+ *  desktop rail in the DOM and is display:none above md, so the first
+ *  definition of a fixed id lived in a hidden subtree — and a paint server
+ *  inside display:none cannot be referenced, so the stroke resolved to
+ *  nothing and the mark vanished on exactly the layout most people see.
  */
 
 export function LogoMark({ className = 'h-5 w-5' }: { className?: string }) {
+  // useId gives ":r1:" style values; url(#…) is happier without the colons
+  const gradientId = `source-mark-${useId().replace(/[^a-zA-Z0-9]/g, '')}`;
   return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.6"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-      aria-hidden="true"
-    >
-      {/* lens */}
-      <circle cx="9.5" cy="9.5" r="7.5" />
-      {/* two ragged column rules, spaced far enough to survive 20px */}
-      <path d="M6 7.5h8M6 11h5.5" />
-      {/* handle, leaving the rim on the 45° diagonal */}
-      <path d="M15 15l5.5 5.5" />
+    <svg viewBox="0 0 24 24" fill="none" className={className} aria-hidden="true">
+      <defs>
+        <linearGradient id={gradientId} x1="4" y1="3" x2="20" y2="21" gradientUnits="userSpaceOnUse">
+          <stop stopColor="#2563eb" />
+          <stop offset="0.55" stopColor="#1d4ed8" />
+          <stop offset="1" stopColor="#1e3a8a" />
+        </linearGradient>
+      </defs>
+      {/* the S: upper bowl sweeps one way, lower bowl the other */}
+      <path
+        d="M16.8 7.6a4.4 4.4 0 1 0-4.8 4.4 4.4 4.4 0 1 1-4.8 4.4"
+        stroke={`url(#${gradientId})`}
+        strokeWidth="3"
+        strokeLinecap="round"
+      />
     </svg>
   );
 }
@@ -43,13 +50,17 @@ export default function Logo({
 }) {
   return (
     <span className={`flex items-center gap-2.5 ${className}`}>
-      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-white/15 bg-white/[0.07] text-white">
+      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white shadow-sm">
         <LogoMark />
       </span>
       {!compact && (
         <span className="leading-tight">
-          <span className="block text-[15px] font-semibold tracking-tight text-white">NewsLens</span>
-          <span className="block text-[11px] text-white/45">See beyond the headlines.</span>
+          <span className="block text-[15px] font-semibold tracking-tight text-white">
+            Source
+          </span>
+          <span className="block text-[11px] font-normal italic text-white/55">
+            Ask. Research. Verify.
+          </span>
         </span>
       )}
     </span>

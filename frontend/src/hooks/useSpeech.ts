@@ -14,6 +14,12 @@ export function useSpeech() {
   const [speakingId, setSpeakingId] = useState<number | null>(null);
   const [loadingId, setLoadingId] = useState<number | null>(null);
   const [errorId, setErrorId] = useState<number | null>(null);
+  // The browser refused to start audio without a gesture. Distinct from an
+  // error: nothing failed, the reader simply has not interacted yet, and the
+  // fix is one tap rather than a retry. Shown once — once any playback has
+  // succeeded the page has user activation and it cannot recur this session.
+  const [autoplayBlocked, setAutoplayBlocked] = useState(false);
+  const everPlayedRef = useRef(false);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const urlRef = useRef<string | null>(null);
@@ -84,13 +90,21 @@ export function useSpeech() {
         };
 
         await audio.play();
+        everPlayedRef.current = true;
+        setAutoplayBlocked(false);
         speakingRef.current = messageId;
         setSpeakingId(messageId);
-      } catch {
+      } catch (error) {
         if (!controller.signal.aborted) {
-          // covers both a failed request and a play() the browser refused
-          // because no gesture preceded it — either way, back to idle
-          setErrorId(messageId);
+          // Two different failures used to land here as one. A play() the
+          // browser refused for want of a gesture is not a broken answer, and
+          // telling the reader "audio unavailable" sent them to retry a button
+          // that would fail identically. Autoplay refusal asks for a tap; a
+          // genuine failure keeps the error state.
+          const refused =
+            error instanceof DOMException && error.name === 'NotAllowedError';
+          if (refused && !everPlayedRef.current) setAutoplayBlocked(true);
+          else setErrorId(messageId);
           release();
         }
       } finally {
@@ -105,5 +119,16 @@ export function useSpeech() {
   // search results is a bug, not a feature.
   useEffect(() => stop, [stop]);
 
-  return { speakingId, loadingId, errorId, speak, stop };
+  /** Called from a real click, which carries the activation autoplay lacked. */
+  const dismissAutoplayPrompt = useCallback(() => setAutoplayBlocked(false), []);
+
+  return {
+    speakingId,
+    loadingId,
+    errorId,
+    autoplayBlocked,
+    dismissAutoplayPrompt,
+    speak,
+    stop,
+  };
 }

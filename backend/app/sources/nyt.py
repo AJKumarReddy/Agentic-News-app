@@ -181,7 +181,7 @@ class NYTSource(NewsSource):
         self.api_key = api_key if api_key is not None else get_settings().nyt_api_key
         self._client = client or httpx.AsyncClient(
             timeout=httpx.Timeout(20.0, connect=10.0),
-            headers={"User-Agent": "news-ai/1.0"},
+            headers={"User-Agent": "source-news/1.0"},
         )
         self._lock = asyncio.Lock()
         self._last_call = 0.0

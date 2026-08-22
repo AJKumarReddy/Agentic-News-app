@@ -1,4 +1,8 @@
-const STORAGE_KEY = 'news-ai-client-id';
+import { readStored, writeStored } from './storage';
+
+// 'source-client-id', migrated from the old 'news-ai-client-id' on first read —
+// a fresh id here would orphan every conversation this browser has written.
+const STORAGE_KEY = 'client-id';
 
 function generateClientId(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -23,11 +27,11 @@ function generateClientId(): string {
 }
 
 export function getClientId(): string {
-  let id = localStorage.getItem(STORAGE_KEY);
+  let id = readStored(STORAGE_KEY);
 
   if (!id) {
     id = generateClientId();
-    localStorage.setItem(STORAGE_KEY, id);
+    writeStored(STORAGE_KEY, id);
   }
 
   return id;

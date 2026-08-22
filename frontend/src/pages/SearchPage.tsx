@@ -2,9 +2,8 @@ import { FormEvent, useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import ArticleCard from '../components/ArticleCard';
 import { SECTIONS } from '../constants/sections';
-import { listSources, searchNews } from '../services/api';
-import { joinNames } from '../utils/list';
-import type { NewsSourceInfo, SearchResponse } from '../types';
+import { searchNews } from '../services/api';
+import type { SearchResponse } from '../types';
 
 export default function SearchPage() {
   // q, section and sources live in the URL (shareable, sidebar links work)
@@ -19,15 +18,8 @@ export default function SearchPage() {
   const [orderBy, setOrderBy] = useState<'newest' | 'oldest' | 'relevance'>('newest');
   const [page, setPage] = useState(1);
   const [result, setResult] = useState<SearchResponse | null>(null);
-  const [sources, setSources] = useState<NewsSourceInfo[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-
-  useEffect(() => {
-    listSources()
-      .then(setSources)
-      .catch(() => setSources([]));
-  }, []);
 
   const runSearch = async (targetPage = 1) => {
     setLoading(true);
@@ -41,7 +33,7 @@ export default function SearchPage() {
         to_date: toDate || undefined,
         order_by: orderBy,
         page: targetPage,
-        page_size: 12,
+        page_size: 24,
       });
       setResult(data);
       setPage(targetPage);
@@ -70,12 +62,6 @@ export default function SearchPage() {
     setParams({ q: queryInput, section, sources: activeSources });
   };
 
-  const toggleSource = (id: string) => {
-    const current = activeSources ? activeSources.split(',') : [];
-    const next = current.includes(id) ? current.filter((s) => s !== id) : [...current, id];
-    setParams({ q: urlQuery, section, sources: next.join(',') });
-  };
-
   // text-base below sm keeps mobile browsers from zooming in on focus; the
   // 44px floor is the tap target, dropped from sm where a pointer is precise
   const inputClass =
@@ -83,15 +69,20 @@ export default function SearchPage() {
 
   return (
     <div className="h-full overflow-y-auto overscroll-contain bg-brand-soft dark:bg-brand-soft-dark">
-      <div className="mx-auto max-w-6xl px-4 py-6 sm:py-7">
-        <h1 className="font-serif text-2xl font-bold text-ink-900 dark:text-ink-50">Search the news</h1>
+      <div className="mx-auto max-w-[104rem] px-4 py-6 sm:py-7">
+        <h1 className="font-serif text-2xl font-bold text-ink-900 dark:text-ink-50">
+          Research the news
+        </h1>
+        {/* no longer lists the publishers: that enumeration went stale every
+            time a key was added or removed, and the promise that matters is
+            the link back to the original, not the roster */}
         <p className="mt-1 text-sm text-ink-500 dark:text-ink-400">
-          Across {sources.length > 0 ? joinNames(sources.map((s) => s.name)) : 'all newsrooms'}
+          Search across trusted newsrooms — every result links back to the original report.
         </p>
 
         {/* one column on a phone — two native date pickers side by side at
             ~165px each clip their own controls in mobile Chrome */}
-        <form onSubmit={submit} className="mt-5 grid grid-cols-1 gap-2.5 sm:grid-cols-2 md:grid-cols-6">
+        <form onSubmit={submit} className="mt-5 grid grid-cols-1 gap-2.5 sm:grid-cols-2 md:grid-cols-7">
           <input
             value={queryInput}
             onChange={(e) => setQueryInput(e.target.value)}
@@ -132,7 +123,7 @@ export default function SearchPage() {
               aria-label="To date"
             />
           </div>
-          <div className="flex gap-2">
+          <div className="flex gap-2 md:col-span-2">
             <select
               value={orderBy}
               onChange={(e) => setOrderBy(e.target.value as typeof orderBy)}
@@ -153,29 +144,6 @@ export default function SearchPage() {
           </div>
         </form>
 
-        {sources.length > 1 && (
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            <span className="text-[11px] font-medium uppercase tracking-wider text-ink-400 dark:text-ink-500">Sources</span>
-            {sources.map((source) => {
-              const selected = !activeSources || activeSources.split(',').includes(source.id);
-              return (
-                <button
-                  key={source.id}
-                  onClick={() => toggleSource(source.id)}
-                  aria-pressed={selected}
-                  className={`inline-flex min-h-[40px] items-center rounded-full border px-4 text-xs font-medium transition-colors sm:min-h-0 sm:px-3 sm:py-1 ${
-                    selected
-                      ? 'border-accent-300 bg-accent-50 text-accent-700 dark:border-accent-500/40 dark:bg-accent-500/20 dark:text-accent-200'
-                      : 'border-ink-200 bg-white text-ink-500 hover:border-ink-300 dark:border-ink-700 dark:bg-ink-800 dark:text-ink-400 dark:hover:border-ink-500'
-                  }`}
-                >
-                  {source.name}
-                </button>
-              );
-            })}
-          </div>
-        )}
-
         {error && (
           <div className="mt-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300">
             {error}
@@ -183,8 +151,8 @@ export default function SearchPage() {
         )}
 
         {loading && (
-          <div className="mt-7 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {Array.from({ length: 6 }).map((_, i) => (
+          <div className="mt-7 grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(min(17rem,100%),1fr))]">
+            {Array.from({ length: 12 }).map((_, i) => (
               <div key={i} className="skeleton h-72 rounded-xl" />
             ))}
           </div>
@@ -192,25 +160,7 @@ export default function SearchPage() {
 
         {!loading && result && (
           <>
-            <div className="mt-6 text-sm text-ink-500 dark:text-ink-400">
-              {result.articles.length} article{result.articles.length === 1 ? '' : 's'} · page{' '}
-              {result.page}
-            </div>
-            {result.degraded_sources && result.degraded_sources.length > 0 && (
-              <div
-                role="status"
-                className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200"
-              >
-                {joinNames(
-                  result.degraded_sources.map(
-                    (id) => sources.find((s) => s.id === id)?.name ?? id,
-                  ),
-                )}{' '}
-                {result.degraded_sources.length === 1 ? 'is' : 'are'} rate limited right now —
-                showing the most recent articles we already had. Newer stories may be missing.
-              </div>
-            )}
-            <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="mt-6 grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(min(17rem,100%),1fr))]">
               {result.articles.map((article) => (
                 <ArticleCard key={article.article_id} article={article} />
               ))}
@@ -228,6 +178,15 @@ export default function SearchPage() {
               >
                 ← Previous
               </button>
+              {/* between the controls that change it, rather than in a status
+                  line at the top of the page nowhere near them */}
+              <span
+                aria-live="polite"
+                className="min-w-[6.5rem] text-center text-sm tabular-nums text-ink-500 dark:text-ink-400"
+              >
+                Page {result.page}
+                {result.pages > 1 && <span className="text-ink-400 dark:text-ink-500"> of {result.pages}</span>}
+              </span>
               <button
                 disabled={page >= result.pages || loading}
                 onClick={() => runSearch(page + 1)}

@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
+import { readStored, writeStored } from '../utils/storage';
 
 export type Theme = 'light' | 'dark';
 
-const STORAGE_KEY = 'news-ai-theme';
+const STORAGE_KEY = 'theme';
 
 function initialTheme(): Theme {
-  const saved = localStorage.getItem(STORAGE_KEY);
+  const saved = readStored(STORAGE_KEY);
   if (saved === 'light' || saved === 'dark') return saved;
   // no explicit choice yet: follow the OS
   return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
@@ -19,12 +20,12 @@ export function useTheme() {
   useEffect(() => {
     document.documentElement.classList.toggle('dark', theme === 'dark');
     document.documentElement.style.colorScheme = theme;
-    localStorage.setItem(STORAGE_KEY, theme);
+    writeStored(STORAGE_KEY, theme);
   }, [theme]);
 
   // keep following the OS until the user picks a side
   useEffect(() => {
-    if (localStorage.getItem(STORAGE_KEY)) return;
+    if (readStored(STORAGE_KEY)) return;
     const media = window.matchMedia('(prefers-color-scheme: dark)');
     const onChange = (e: MediaQueryListEvent) => setTheme(e.matches ? 'dark' : 'light');
     media.addEventListener('change', onChange);
