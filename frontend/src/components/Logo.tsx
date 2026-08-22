@@ -1,43 +1,31 @@
-import { useId } from 'react';
-
-/** Source wordmark and its "S" swirl.
+/** Source wordmark and its "S" mark.
  *
- *  The mark is one stroked S with round caps — two arcs turning opposite ways,
- *  which is what gives the brand sheet's swirl its motion. Stroked rather than
- *  filled so a single path holds up at the 20px the mobile bar renders it at;
- *  a filled swirl with a tapering tail loses the taper and reads as a blob.
+ *  The mark is the brand sheet's 3D S under a magnifier, cropped out of the
+ *  sheet and shipped from /public. It carries its own Midnight ground and
+ *  glow, which is why the white tile that used to sit behind the drawn version
+ *  is gone — a tile under it would frame a frame.
  *
- *  It paints itself in the brand gradient rather than currentColor, because
- *  the sheet's S is the same blue on the white tile and the Midnight one.
+ *  Corners round in percent rather than at a fixed radius: the mark renders at
+ *  32px in the rail and 20px in the mobile bar, and one `rounded-lg` that
+ *  looks right at 32 reads as a chamfer at 20.
  *
- *  The gradient id comes from useId, one per instance. A shared constant id
- *  looked tidier and rendered nothing: the mobile top bar sits before the
- *  desktop rail in the DOM and is display:none above md, so the first
- *  definition of a fixed id lived in a hidden subtree — and a paint server
- *  inside display:none cannot be referenced, so the stroke resolved to
- *  nothing and the mark vanished on exactly the layout most people see.
+ *  The stroked SVG this replaced needed a per-instance gradient id, because a
+ *  shared one resolved to nothing in the mobile bar — that subtree is
+ *  display:none above md and comes first in the DOM, and a paint server inside
+ *  display:none cannot be referenced. A raster has no paint server, so the
+ *  useId workaround went with it.
  */
 
 export function LogoMark({ className = 'h-5 w-5' }: { className?: string }) {
-  // useId gives ":r1:" style values; url(#…) is happier without the colons
-  const gradientId = `source-mark-${useId().replace(/[^a-zA-Z0-9]/g, '')}`;
   return (
-    <svg viewBox="0 0 24 24" fill="none" className={className} aria-hidden="true">
-      <defs>
-        <linearGradient id={gradientId} x1="4" y1="3" x2="20" y2="21" gradientUnits="userSpaceOnUse">
-          <stop stopColor="#2563eb" />
-          <stop offset="0.55" stopColor="#1d4ed8" />
-          <stop offset="1" stopColor="#1e3a8a" />
-        </linearGradient>
-      </defs>
-      {/* the S: upper bowl sweeps one way, lower bowl the other */}
-      <path
-        d="M16.8 7.6a4.4 4.4 0 1 0-4.8 4.4 4.4 4.4 0 1 1-4.8 4.4"
-        stroke={`url(#${gradientId})`}
-        strokeWidth="3"
-        strokeLinecap="round"
-      />
-    </svg>
+    <img
+      src="/source-icon.webp"
+      alt=""
+      aria-hidden="true"
+      draggable={false}
+      decoding="async"
+      className={`shrink-0 rounded-[22%] object-cover ${className}`}
+    />
   );
 }
 
@@ -50,9 +38,7 @@ export default function Logo({
 }) {
   return (
     <span className={`flex items-center gap-2.5 ${className}`}>
-      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white shadow-sm">
-        <LogoMark />
-      </span>
+      <LogoMark className="h-8 w-8 shadow-sm" />
       {!compact && (
         <span className="leading-tight">
           <span className="block text-[15px] font-semibold tracking-tight text-white">

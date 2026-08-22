@@ -99,7 +99,7 @@
         },
         {
           "name": "TTS_VOICE",
-          "value": "alloy"
+          "value": "sage"
         }
       ],
       "secrets": [

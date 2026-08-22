@@ -101,7 +101,7 @@ class Settings(BaseSettings):
     # ever speaks. Enabled here costs nothing until somebody opts in.
     tts_enabled: bool = True
     tts_model: str = "gpt-4o-mini-tts"
-    tts_voice: str = "alloy"
+    tts_voice: str = "sage"
     tts_format: str = "mp3"
     # Delivery steering. Only the gpt-4o speech models accept this; it is
     # dropped for the tts-1 family, which rejects the parameter.
