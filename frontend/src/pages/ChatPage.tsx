@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import ArticleChip from '../components/ArticleChip';
 import ChatInput from '../components/ChatInput';
-import MessageBubble from '../components/MessageBubble';
+import MessageBubble, { preloadMarkdown } from '../components/MessageBubble';
 import VoiceNudge from '../components/VoiceNudge';
 import { getConversation } from '../services/api';
 import { useChat } from '../hooks/useChat';
@@ -70,6 +70,12 @@ export default function ChatPage({
   // from it (back button, logo) clears it — but an in-progress new chat,
   // which has an id without a URL param, is never wiped
   const openedFromUrl = useRef(false);
+
+  // The page is nothing but answers, so the markdown chunk is wanted before
+  // the first one arrives rather than after it.
+  useEffect(() => {
+    preloadMarkdown();
+  }, []);
 
   useEffect(() => {
     if (!requestedConversation) {

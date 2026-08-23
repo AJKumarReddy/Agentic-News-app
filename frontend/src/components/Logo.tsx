@@ -1,9 +1,10 @@
 /** Source wordmark and its "S" mark.
  *
- *  The mark is the brand sheet's 3D S under a magnifier, cropped out of the
- *  sheet and shipped from /public. It carries its own Midnight ground and
- *  glow, which is why the white tile that used to sit behind the drawn version
- *  is gone — a tile under it would frame a frame.
+ *  The mark is the 3D S under a magnifier, shipped from /public. It carries a
+ *  white ground of its own, so it reads as a tile wherever it lands — which is
+ *  the point on the rail and the mobile bar, where it sits on Midnight. The
+ *  earlier cut of this art came on that dark ground instead and dissolved into
+ *  those surfaces; nothing is drawn behind it either way.
  *
  *  Corners round in percent rather than at a fixed radius: the mark renders at
  *  32px in the rail and 20px in the mobile bar, and one `rounded-lg` that

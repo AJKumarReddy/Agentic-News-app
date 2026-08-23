@@ -1,13 +1,19 @@
-import { useState } from 'react';
+import { Suspense, lazy, useState } from 'react';
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import SagePopup from './components/SagePopup';
 import Sidebar from './components/Sidebar';
 import { useCapabilities } from './hooks/useCapabilities';
 import { useTheme } from './hooks/useTheme';
 import { useVoice } from './hooks/useVoice';
-import ArticlePage from './pages/ArticlePage';
-import ChatPage from './pages/ChatPage';
 import SearchPage from './pages/SearchPage';
+
+// Search is the landing route and stays in the entry bundle: making the page
+// almost everyone arrives on wait for a second round trip would cost more than
+// the split saves. The other two are fetched when someone actually goes there,
+// which on a phone is the difference between parsing the whole app before the
+// first headline and parsing what that headline needs.
+const ChatPage = lazy(() => import('./pages/ChatPage'));
+const ArticlePage = lazy(() => import('./pages/ArticlePage'));
 
 /** The site root used to be the chat; it now opens the news.
  *
@@ -44,6 +50,11 @@ export default function App() {
         voiceAvailable={voice.available}
       />
       <main className="min-h-0 min-w-0 flex-1">
+        {/* The chunk lands in a few hundred milliseconds on a warm connection,
+            so the fallback's job is only to keep the shell from collapsing
+            while it does — the rail and the Sage button stay put, and nothing
+            reflows when the page arrives. */}
+        <Suspense fallback={<div className="h-full bg-brand-soft dark:bg-brand-soft-dark" />}>
         <Routes>
           <Route path="/" element={<RootRedirect />} />
           <Route path="/search" element={<SearchPage />} />
@@ -60,6 +71,7 @@ export default function App() {
           {/* Guardian article IDs contain slashes → splat route */}
           <Route path="/article/*" element={<ArticlePage />} />
         </Routes>
+        </Suspense>
       </main>
       {/* outside <main> so neither the button nor its panel is clipped by a
           page's own scroll container */}

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import ChatInput from './ChatInput';
-import MessageBubble from './MessageBubble';
+import MessageBubble, { preloadMarkdown } from './MessageBubble';
 import SageAvatar from './SageAvatar';
 import { deleteConversation, getConversation } from '../services/api';
 import { useChat } from '../hooks/useChat';
@@ -247,6 +247,25 @@ export default function SagePopup({
   useEffect(() => {
     if (open) bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, open]);
+
+  // Below md this panel covers the page, so the feed behind it must not scroll
+  // under it — the same rule the navigation drawer follows. Only the class is
+  // set here: whether it actually locks is a media query in index.css, so the
+  // breakpoint cannot drift from the `md:static` below and a rotate into
+  // landscape releases it with nothing listening for the resize. Its own class
+  // rather than the drawer's `overflow-hidden`, so closing one never unlocks
+  // the page while the other is still open.
+  useEffect(() => {
+    if (!open) return;
+    document.body.classList.add('sage-overlay-open');
+    return () => document.body.classList.remove('sage-overlay-open');
+  }, [open]);
+
+  // Opening the panel is the earliest honest signal that an answer is coming;
+  // fetching the markdown chunk now overlaps it with the reader typing.
+  useEffect(() => {
+    if (open) preloadMarkdown();
+  }, [open]);
 
   // Escape closes, matching the mobile drawer. No outside-click handler: the
   // panel deliberately does not trap the page, and dismissing a half-typed

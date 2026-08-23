@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -98,6 +98,26 @@ describe('Sage side view', () => {
     releaseStale?.();
     await waitFor(() => expect(screen.queryByText('the old thread')).not.toBeInTheDocument());
     expect(screen.getByText('the one on screen')).toBeInTheDocument();
+  });
+
+  it('holds the page still behind it while open, and lets go when closed', async () => {
+    // Below md the panel covers the page. Without this the feed behind kept
+    // scrolling under it, so closing Sage returned the reader somewhere other
+    // than where they opened it. The class is all this component owns; the
+    // media query in index.css decides whether it bites, so the lock cannot
+    // apply at the sizes where the panel is a column beside the page.
+    vi.mocked(getConversation).mockResolvedValue(thread('abc', 'carried across'));
+    const { unmount } = renderPanel({ dockSage: 'abc' });
+
+    await screen.findByText('carried across');
+    expect(document.body.classList.contains('sage-overlay-open')).toBe(true);
+
+    fireEvent.click(screen.getByLabelText('Close Sage'));
+    expect(document.body.classList.contains('sage-overlay-open')).toBe(false);
+
+    // and leaving the page while it is open must not strand the lock on
+    unmount();
+    expect(document.body.classList.contains('sage-overlay-open')).toBe(false);
   });
 
   it('stays shut when there is no handover and nothing stored', () => {

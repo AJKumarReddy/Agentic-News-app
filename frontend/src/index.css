@@ -24,6 +24,18 @@ html {
   -webkit-tap-highlight-color: rgba(37, 99, 235, 0.14);
 }
 
+/* Below md the Sage panel is a full-screen overlay (it is `md:static` — a
+   column of the page from there up), so the feed behind it must not scroll,
+   exactly as the navigation drawer already does. The breakpoint lives here
+   rather than in a matchMedia listener so it can only ever agree with the
+   `md:` the panel itself uses, and so a rotate into landscape releases the
+   lock without anything having to observe the resize. */
+@media (max-width: 767.98px) {
+  body.sage-overlay-open {
+    overflow: hidden;
+  }
+}
+
 body {
   @apply bg-ink-50 text-ink-900 antialiased transition-colors duration-200;
   /* nothing scrolls at the body level — this stops pull-to-refresh firing when

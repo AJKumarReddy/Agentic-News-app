@@ -1,10 +1,27 @@
-import { memo } from 'react';
-import Markdown from './Markdown';
+import { Suspense, lazy, memo } from 'react';
 import RouteBadge from './RouteBadge';
 import SageAvatar from './SageAvatar';
 import SourceList from './SourceList';
 import VoiceIcon from './VoiceIcon';
 import type { ChatMessage, SpeechState } from '../types';
+
+// react-markdown and remark-gfm are the heaviest thing the app ships, and this
+// is the only component that renders them — but the Sage panel is mounted on
+// every page, so a static import put the whole markdown pipeline in the entry
+// bundle of a reader who only ever browses headlines. Split out, it is fetched
+// by the surfaces that show answers.
+const Markdown = lazy(() => import('./Markdown'));
+
+/** Fetch the markdown chunk ahead of the answer that will need it.
+ *
+ *  Called when a chat surface opens, so the request overlaps the round trip to
+ *  our own API rather than starting after the first token arrives. Without it
+ *  the opening of a streamed answer renders as its own source for an instant.
+ *  Idempotent: the module registry returns the same promise after the first
+ *  call, so repeat calls cost nothing. */
+export function preloadMarkdown() {
+  void import('./Markdown');
+}
 
 // The tooltip: the fuller sentence, room for the detail the button face
 // cannot hold.
@@ -79,7 +96,17 @@ function MessageBubble({
           </div>
         )}
 
-        {message.content && <Markdown content={message.content} sources={message.sources} />}
+        {message.content && (
+          // The fallback is the answer itself, unformatted — the reader sees
+          // the words while the formatting catches up, rather than a spinner
+          // standing where the text will be. Only ever seen if an answer beats
+          // the preload above; after the chunk lands nothing suspends again.
+          <Suspense
+            fallback={<div className="prose-chat whitespace-pre-wrap">{message.content}</div>}
+          >
+            <Markdown content={message.content} sources={message.sources} />
+          </Suspense>
+        )}
 
         {message.streaming && message.content && (
           <span className="ml-0.5 inline-block h-4 w-[3px] animate-pulse rounded-full bg-brand-500 align-text-bottom" />
