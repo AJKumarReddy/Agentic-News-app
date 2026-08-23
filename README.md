@@ -410,15 +410,14 @@ Because NYT and TheNewsAPI chunks are an order of magnitude shorter than full-te
 
 ## Scheduled ingestion
 
-The same module keeps the index current in both environments — only the thing that calls it
-changes.
+One loop, one interval, every environment — including production. A tick refreshes **one desk**
+and cycles through the 13, so the index stays current without an external cron.
 
-| | Trigger | Interval | Scope per run | Requests/day per publisher |
+| | Interval | Scope per tick | Full cycle | Requests/day per publisher |
 |---|---|---|---|---|
-| **Local** | in-process loop inside the backend | 5 minutes | one desk, rotating | 288 |
-| **Production** | EventBridge Scheduler → one-shot Fargate task | 30 minutes | all 13 desks | 624 |
+| **Local and production** | 7 minutes | one desk, rotating | 91 minutes | ~205 |
 
-The sweep covers **13 Guardian desks, weightiest category first** (`sources/categories.py`
+The rotation covers **13 Guardian desks, weightiest category first** (`sources/categories.py`
 → `ingest_sections()`) — every desk the five canonical categories cover, not one per category.
 That is a correctness requirement rather than thoroughness: retrieval widens a slug into its
 subject neighbours, so a question about `us-news` also looks under `politics`, `world` and
@@ -432,36 +431,37 @@ articles to be worth spending a metered budget on indexing rather than on a sear
 waiting for? At three articles a call it did not; at 25 it does.
 
 Each publisher's cap is enforced on its own counter (`sources/quota.py`), so the sweep is charged
-per source and one publisher running out never mutes the others. Background work stops at
-`budget − reserve`, which is what keeps a sweep from spending the requests a reader is waiting on.
+per source and one publisher running out never mutes the others.
 
-> **The production interval is worth checking against your keys.** One desk every five minutes is
-> 288 requests/day per publisher, inside the 500/day Guardian and NYT developer cap and inside the
-> 350 their `INTERACTIVE_RESERVE` leaves background work — with every desk refreshed within 65
-> minutes. Sweeping all 13 every 30 minutes is **624/day**, over both. `rate(60 minutes)` lands at
-> 312 and stays inside them. For TheNewsAPI either figure is comfortably inside the ~1,500/day its
-> own budget leaves the sweep.
->
-> The budgets are the backstop, not the schedule: past `budget − reserve` the sweep simply stops
-> for the day and the index goes stale, so the interval is still the thing to get right.
+> **The ceiling that binds is not the plan's.** Background work is cut off at
+> `DAILY_BUDGET − INTERACTIVE_RESERVE` — **350** for the Guardian and the NYT — which is what
+> keeps a sweep from spending the requests a reader is waiting on. One desk every 7 minutes is
+> ~205/day, comfortably inside it. Two desks on that interval is 411, and past the ceiling the
+> sweep does not slow down: it stops for the rest of the UTC day and the index goes stale. Keep
+> `(1440 / INGEST_INTERVAL_MINUTES) × INGEST_SECTIONS_PER_TICK` under 350 when tuning.
 
 ```bash
-# manual run — sweeps all 13 desks, for a cold index or an external scheduler
+# manual run — sweeps all 13 desks at once, for a cold index
 docker compose exec backend python -m app.tasks.ingest_recent
 ```
 
-**Locally**, a tick refreshes **one desk** and cycles through the 13, because the request budget is the binding constraint: each desk costs one request per publisher and developer keys cap at **500 requests/day**. One desk every 5 minutes is 288/day — in budget, with every desk current within 65 minutes. Sweeping all 13 on that interval would be 3,744/day, and the overage fails quietly (a rejected fetch is logged and returns empty, so the index just stops moving). Keep `(1440 / INGEST_INTERVAL_MINUTES) × INGEST_SECTIONS_PER_TICK` under 500 when tuning.
+Under multiple Gunicorn workers — and under multiple Fargate replicas — a short-lived **Redis
+lock** ensures exactly one performs each tick, so publisher API usage isn't multiplied by the
+worker count. The rotation is derived from the clock rather than in-process state, so every worker
+resolves the same slice for a tick and a restart resumes the cycle in place. The lock fails open:
+a Redis outage still ingests rather than silently freezing the index. A failed run is logged and
+retried on the next tick.
 
-Under multiple Gunicorn workers a short-lived **Redis lock** ensures exactly one worker performs each run, so publisher API usage isn't multiplied by the worker count. The rotation is derived from the clock rather than in-process state, so every worker resolves the same slice for a tick and a restart resumes the cycle in place. The lock fails open: a Redis outage still ingests rather than silently freezing the index. A failed run is logged and retried on the next tick.
+**Checking it actually runs.** Filter the backend log for `ingest`. `scheduled_ingest_tick` and
+`scheduled_ingest_section` every 7 minutes is the healthy state; a stream of
+`scheduled ingestion disabled` means `INGEST_ENABLED` is not `true`. That distinction is worth
+knowing because a scheduler that never runs reports nothing at all — production once sat that way,
+its index fed only by the incidental indexing a freshness question triggers.
 
-**In production the in-process loop is off** (`INGEST_ENABLED=false` on the ECS services). Every
-Fargate replica would otherwise run its own copy, and cron work tied to long-running replicas
-stops whenever the service scales down or redeploys. **EventBridge Scheduler** instead runs
-`python -m app.tasks.ingest_recent` as a one-shot Fargate task every 30 minutes, reusing the
-backend task definition with only the command overridden — same image, same secrets, same log
-group, so the job can never drift from the API it feeds. A direct invocation sweeps all 13 desks,
-which is why the interval there is the one to tune — see the note above. Setup in
-[aws/ECS_PIPELINE.md](aws/ECS_PIPELINE.md).
+An earlier design ran ingestion as an **EventBridge one-shot Fargate task** instead, to avoid
+tying cron work to long-running replicas. It is not used: a direct invocation sweeps all 13 desks
+in one run rather than a rotating slice, so the interval multiplies by 13 and any short cadence
+lands far past the ceiling. See [aws/ECS_PIPELINE.md](aws/ECS_PIPELINE.md) §9.
 
 ## Interface
 
@@ -571,7 +571,7 @@ Notes that matter in production:
   unchanged: it still reads `DATABASE_URL` and `REDIS_URL`.
 - **ALB idle timeout must be ~300 s** — `/api/chat` streams over SSE and the 60 s default cuts
   long answers off mid-stream.
-- **`INGEST_ENABLED=false` on the services**; ingestion is an EventBridge-scheduled Fargate task.
+- **`INGEST_ENABLED=true` on the services**; ingestion is the in-process loop, deduplicated across replicas by a Redis tick lock. There is no EventBridge schedule.
 - **RDS and ElastiCache are never publicly accessible** — private data subnets, security groups
   that only accept traffic from the ECS tasks.
 - **The frontend is baked at build time.** The workflow passes `VITE_API_BASE_URL` (default

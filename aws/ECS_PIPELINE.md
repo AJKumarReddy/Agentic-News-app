@@ -189,9 +189,9 @@ Other roles created later in this guide:
 | `guardianEcsExecutionRole` | `ecs-tasks.amazonaws.com` | `AmazonECSTaskExecutionRolePolicy` + `ssm:GetParameters` on `/guardian-app/*` |
 | `guardianEcsTaskRole` | `ecs-tasks.amazonaws.com` | nothing today — the app makes no AWS API calls |
 | GitHub Actions deployer | an IAM user (or an OIDC role — see §10) | ECR push set + `sts:GetCallerIdentity` + `ecs:RegisterTaskDefinition`, `ecs:DescribeServices`, `ecs:UpdateService` + `iam:PassRole` for the two task roles |
-| `guardianSchedulerRole` | `scheduler.amazonaws.com` | `ecs:RunTask` on the backend task definition + `iam:PassRole` for `guardianEcsExecutionRole` and `guardianEcsTaskRole` |
+| `guardianSchedulerRole` | `scheduler.amazonaws.com` | `ecs:RunTask` on the backend task definition + `iam:PassRole` for `guardianEcsExecutionRole` and `guardianEcsTaskRole` — **not needed** while ingestion runs in-process (§9); create it only if you reinstate EventBridge Scheduler |
 
-The scheduler role policy in full:
+The scheduler role policy in full — only if you reinstate the scheduler (§9):
 
 ```json
 {
@@ -239,7 +239,7 @@ aws ecs register-task-definition --cli-input-json file://aws/taskdef-frontend.js
 
 Both are `FARGATE` / `awsvpc`; the backend exposes **8000** (Gunicorn managing Uvicorn workers)
 and the frontend **80** (nginx serving the SPA build). Neither contains a PostgreSQL or Redis
-sidecar — those are RDS and ElastiCache. The backend sets **`INGEST_ENABLED=false`**: see §9.
+sidecar — those are RDS and ElastiCache. The backend sets **`INGEST_ENABLED=true`** and dedupes across replicas with a Redis tick lock: see §9.
 
 The `image` value in each file is a bootstrap placeholder. The deploy workflow overwrites it on
 every run with the immutable commit-SHA tag and registers a new task definition revision, so
@@ -341,46 +341,48 @@ aws ecs create-service --cluster guardian-cluster --service-name guardian-fronte
 `assignPublicIp=ENABLED` — the security groups still block inbound traffic that is not from the
 ALB.
 
-## 9. Scheduled ingestion (EventBridge Scheduler → RunTask)
+## 9. Scheduled ingestion (the in-process loop)
 
-The in-process scheduler is **disabled in production** (`INGEST_ENABLED=false` in
-`aws/taskdef-backend.json`). Its Redis lock keeps concurrent Gunicorn workers from duplicating
-pulls, but relying on long-running replicas to run cron work means ingestion stops whenever the
-service scales to zero and restarts on every deploy. A scheduled one-shot task is explicit and
-independent of replica count.
+Ingestion runs **inside the backend service**: `INGEST_ENABLED=true` in
+`aws/taskdef-backend.json`, one desk every `INGEST_INTERVAL_MINUTES` (7). There is no
+EventBridge schedule and no one-shot task — see below for why that approach was dropped.
 
-Note the interval. The in-process scheduler ticks every 5 minutes and refreshes **one** desk per
-tick — 288 requests/day per publisher, inside the 500/day Guardian and NYT developer cap.
-Invoking the module directly sweeps **all 13** desks (`ingest_sections()`), so `rate(30 minutes)`
-below is 13 × 48 = **624/day per publisher**, over that cap. `rate(60 minutes)` lands at 312 and
-stays inside it; keep `(1440 / interval_minutes) × 13` under 500 when tuning. TheNewsAPI is
-metered separately and both figures sit well inside the ~1,500/day its budget leaves the sweep.
+Every replica starts the loop, and a short-lived **Redis lock** in `app/tasks/scheduler.py` means
+exactly one performs each tick, so publisher usage is not multiplied by the replica count. The
+rotation is derived from the clock rather than from in-process state, so both replicas resolve the
+same desk for a tick and a deploy resumes the cycle in place instead of restarting it.
 
-```bash
-aws scheduler create-schedule --name guardian-ingest \
-  --schedule-expression "rate(30 minutes)" \
-  --flexible-time-window Mode=OFF \
-  --target '{
-    "Arn":"arn:aws:ecs:'$AWS_REGION':'$ACCOUNT_ID':cluster/guardian-cluster",
-    "RoleArn":"arn:aws:iam::'$ACCOUNT_ID':role/guardianSchedulerRole",
-    "EcsParameters":{
-      "TaskDefinitionArn":"arn:aws:ecs:'$AWS_REGION':'$ACCOUNT_ID':task-definition/guardian-backend",
-      "LaunchType":"FARGATE",
-      "NetworkConfiguration":{"awsvpcConfiguration":{
-        "Subnets":["<PRIVATE_APP_SUBNET_A>","<PRIVATE_APP_SUBNET_B>"],
-        "SecurityGroups":["<SG_ECS>"],
-        "AssignPublicIp":"DISABLED"}}
-    },
-    "Input":"{\"containerOverrides\":[{\"name\":\"backend\",\"command\":[\"python\",\"-m\",\"app.tasks.ingest_recent\"]}]}"
-  }'
-```
+**The arithmetic.** One desk per tick every 7 minutes is 1,440/7 ≈ **205 requests/day per
+publisher**, and walks all 13 desks (`ingest_sections()`) in 91 minutes. The ceiling that binds is
+not the plan's 500/day but `DAILY_BUDGET - INTERACTIVE_RESERVE` — **350** for the Guardian and the
+NYT — because that is where `app/sources/quota.py` cuts background work off to leave readers their
+share. Past it the sweep does not slow down, it stops for the rest of the UTC day. Keep
+`(1440 / INGEST_INTERVAL_MINUTES) × INGEST_SECTIONS_PER_TICK` under 350 when tuning; two desks
+every 7 minutes is 411 and would truncate the day. TheNewsAPI is metered separately and 205 sits
+well inside the ~1,500/day its own budget leaves the sweep.
 
-It **reuses the backend task definition** — same image, same secrets, same log group — with
-only the command overridden, so the ingest job can never drift from the API it feeds. Runs
-appear under the `/ecs/guardian-backend` log group; each finishes with a
-`scheduled_ingest_complete` event.
+**Verifying it.** Runs appear in the `/ecs/guardian-backend` log group. Filter for `ingest`:
+`scheduled_ingest_tick` and `scheduled_ingest_section` every 7 minutes is the healthy state.
+`scheduled ingestion disabled` means `INGEST_ENABLED` is not `true`; a stream of those and nothing
+else is the failure this section exists to prevent.
 
-`guardianSchedulerRole` needs exactly `ecs:RunTask` and `iam:PassRole` (policy in §5).
+### Why not EventBridge Scheduler
+
+An earlier version of this document specified a one-shot Fargate task on
+`rate(30 minutes)`, on the reasoning that cron work tied to long-running replicas stops whenever
+the service scales to zero. That schedule was never created in the account, so production simply
+did not ingest — the index grew only from the incidental on-the-fly indexing that freshness
+questions trigger, and the gap went unnoticed because nothing reports a scheduler that isn't
+there.
+
+It is also the wrong shape for this workload. Invoking the module directly sweeps **all 13** desks
+in one run rather than a rotating slice, so the interval multiplies by 13: `rate(30 minutes)` is
+624 requests/day per publisher and `rate(7 minutes)` would be 2,674 — both past the 350 ceiling.
+Reaching a short cadence that way would mean teaching the CLI entrypoint to take a rotating slice,
+which is precisely what the in-process loop already does.
+
+If you do reinstate it, keep the two mutually exclusive: both spend from the same daily counter,
+and running them together doubles consumption while each looks correctly configured on its own.
 
 ## 10. The deploy workflow
 
@@ -478,8 +480,9 @@ aws logs tail /ecs/guardian-backend --follow
 | Target group unhealthy | Backend takes ~20 s to boot; the 60 s grace period covers it. Check `/ecs/guardian-backend` in CloudWatch |
 | `"database": {"connected": false}` in `/api/health` | `SG_DATA` must allow 5432 from `SG_ECS`; verify the `DATABASE_URL` parameter and that RDS is in the same VPC |
 | Chat stream cuts off mid-answer | ALB idle timeout — set it to 300 s (§7) |
-| Index stops updating | The scheduled task: EventBridge Scheduler history, then `scheduled_ingest_complete` events in `/ecs/guardian-backend` |
-| Both service tasks *and* the scheduled task ingest | `INGEST_ENABLED` is not `false` on the service task definition |
+| Index stops updating | Filter `/ecs/guardian-backend` for `ingest`. `scheduled_ingest_tick` every 7 minutes is healthy; `scheduled ingestion disabled` means `INGEST_ENABLED` is not `true`; nothing at all means the tasks are not running |
+| Index updates for part of the day, then stops | The sweep hit `DAILY_BUDGET - INTERACTIVE_RESERVE` and is refused until UTC midnight — lengthen `INGEST_INTERVAL_MINUTES` or raise that publisher's budget (§9) |
+| Ingestion runs twice per tick | Redis is unreachable, so the tick lock fails open and every replica ingests. Check `REDIS_URL` and `SG_DATA` |
 | Deploy job hangs on "service stability" | ECS service Events tab — failing health checks roll the deployment back |
 | Deploy fails on `RegisterTaskDefinition` | Deployer policy missing `ecs:RegisterTaskDefinition` or `iam:PassRole` for the two task roles (§10) |
 | Deploy fails with an invalid-ARN error | `<ACCOUNT_ID>` not substituted — the workflow's "Resolve account id" step needs `sts:GetCallerIdentity` |

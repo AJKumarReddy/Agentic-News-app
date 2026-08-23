@@ -103,7 +103,15 @@
         },
         {
           "name": "INGEST_ENABLED",
-          "value": "false"
+          "value": "true"
+        },
+        {
+          "name": "INGEST_INTERVAL_MINUTES",
+          "value": "7"
+        },
+        {
+          "name": "INGEST_SECTIONS_PER_TICK",
+          "value": "1"
         },
         {
           "name": "TRUSTED_PROXY_HOPS",

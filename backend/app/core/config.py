@@ -154,12 +154,21 @@ class Settings(BaseSettings):
     # otherwise run until it hit the byte cap and came back as a 413.
     stt_max_seconds: int = 60
 
-    # Scheduled ingestion: keeps the index current without an external cron
+    # Scheduled ingestion: keeps the index current without an external cron.
+    # The same loop runs in every environment — production included, where the
+    # Redis lock in `tasks/scheduler.py` is what stops each Fargate replica
+    # from running its own copy of the tick.
     ingest_enabled: bool = True
-    ingest_interval_minutes: int = 5
+    #: One desk per tick at this interval is 1,440/7 ≈ 205 requests a day per
+    #: publisher, and walks all 13 desks in 91 minutes. The ceiling that
+    #: matters is not the plan's 500 but `daily_budget - interactive_reserve`
+    #: — 350 for the Guardian and the NYT — because that is where background
+    #: work is cut off to leave readers their share.
+    ingest_interval_minutes: int = 7
     ingest_start_delay_seconds: int = 60
-    # sections refreshed per tick; interval × this must stay under the
-    # publishers' 500 requests/day developer cap (see rotating_sections)
+    #: Desks refreshed per tick. Raising this multiplies the cost: two desks
+    #: every 7 minutes is 411/day, past that 350, and the sweep would stop
+    #: partway through the day — a slower cycle beats a truncated one.
     ingest_sections_per_tick: int = 1
 
     # Security layer

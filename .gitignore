@@ -52,3 +52,7 @@ tmp/
 
 # ── Claude Code — local agent config & worktrees ───────
 .claude/
+
+# Production runbook — carries the real account id, resource names and the
+# exact deploy sequence for this deployment. Local only, never pushed.
+PROD.md
