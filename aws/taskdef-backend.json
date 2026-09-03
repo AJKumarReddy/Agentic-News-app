@@ -79,7 +79,7 @@
         },
         {
           "name": "FRONTEND_URL",
-          "value": "https://www.newsagentai.publicvm.com"
+          "value": "https://d3l66lrowfang5.cloudfront.net"
         },
         {
           "name": "RAG_INITIAL_TOP_K",
@@ -115,7 +115,7 @@
         },
         {
           "name": "TRUSTED_PROXY_HOPS",
-          "value": "1"
+          "value": "2"
         },
         {
           "name": "CHAT_RATE_LIMIT_PER_MINUTE",
@@ -136,6 +136,10 @@
         {
           "name": "TTS_VOICE",
           "value": "sage"
+        },
+        {
+          "name": "EXTRA_CORS_ORIGINS",
+          "value": "https://www.newsagentai.publicvm.com"
         }
       ],
       "secrets": [
