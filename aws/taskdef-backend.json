@@ -99,7 +99,7 @@
         },
         {
           "name": "RATE_LIMIT_PER_MINUTE",
-          "value": "30"
+          "value": "120"
         },
         {
           "name": "INGEST_ENABLED",
@@ -119,11 +119,11 @@
         },
         {
           "name": "CHAT_RATE_LIMIT_PER_MINUTE",
-          "value": "10"
+          "value": "30"
         },
         {
           "name": "AUDIO_RATE_LIMIT_PER_MINUTE",
-          "value": "20"
+          "value": "40"
         },
         {
           "name": "TTS_ENABLED",
