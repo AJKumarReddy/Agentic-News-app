@@ -53,6 +53,14 @@ class Settings(BaseSettings):
     # Active publishers, in priority order
     enabled_sources: str = "guardian,nyt,thenewsapi"
 
+    # Longest a single publisher may hold up a search before the stored copy is
+    # served instead. Each client serialises its own calls behind a minimum
+    # interval and retries a 429 with backoff, so under concurrent traffic one
+    # throttled publisher otherwise sets the latency for the whole response —
+    # the NYT dev key turns ten parallel searches into a fourteen-second wait
+    # while Guardian and TheNewsAPI have already answered in under three.
+    search_source_timeout_seconds: float = 4.0
+
     # Tavily web search — supplementary sources when Guardian evidence is thin.
     # Empty key disables web search entirely (Guardian-only mode).
     tavily_api_key: str = ""

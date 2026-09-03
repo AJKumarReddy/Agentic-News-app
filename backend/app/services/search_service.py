@@ -12,6 +12,7 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 
+from app.core.config import get_settings
 from app.core.logging import log_event
 from app.guardian.models import GuardianSearchResult, NormalizedArticle
 from app.sources import enabled_sources
@@ -195,17 +196,26 @@ async def search_news(
 
     async def run(source) -> tuple[SourceResult, bool]:
         try:
-            result = await source.search_page(
-                query=query,
-                from_date=from_date,
-                to_date=to_date,
-                section=section,
-                order_by=order_by,
-                page=page,
-                page_size=per_source,
+            result = await asyncio.wait_for(
+                source.search_page(
+                    query=query,
+                    from_date=from_date,
+                    to_date=to_date,
+                    section=section,
+                    order_by=order_by,
+                    page=page,
+                    page_size=per_source,
+                ),
+                timeout=get_settings().search_source_timeout_seconds,
             )
             result.articles = drop_non_news(result.articles)
             return result, True
+        except TimeoutError:
+            # Treated exactly like a failure so the caller falls back to the
+            # store: a slow publisher costs freshness for its own articles,
+            # never the latency of the whole search.
+            logger.warning("source %s timed out", source.id)
+            return SourceResult(), False
         except NewsSourceError as exc:
             logger.warning("source %s failed: %s", source.id, exc)
             return SourceResult(), False
