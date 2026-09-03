@@ -35,7 +35,7 @@
         },
         {
           "name": "ENABLED_SOURCES",
-          "value": "guardian,nyt,thenewsapi"
+          "value": "guardian,nyt"
         },
         {
           "name": "GUARDIAN_DAILY_BUDGET",
@@ -52,18 +52,6 @@
         {
           "name": "NYT_INTERACTIVE_RESERVE",
           "value": "150"
-        },
-        {
-          "name": "THENEWSAPI_PAGE_SIZE",
-          "value": "25"
-        },
-        {
-          "name": "THENEWSAPI_DAILY_BUDGET",
-          "value": "2500"
-        },
-        {
-          "name": "THENEWSAPI_INTERACTIVE_RESERVE",
-          "value": "1000"
         },
         {
           "name": "CHAT_MODEL",
@@ -146,14 +134,6 @@
         {
           "name": "NYT_API_KEY",
           "valueFrom": "arn:aws:ssm:us-east-2:<ACCOUNT_ID>:parameter/guardian-app/NYT_API_KEY"
-        },
-        {
-          "name": "THENEWSAPI_API_KEY",
-          "valueFrom": "arn:aws:ssm:us-east-2:<ACCOUNT_ID>:parameter/guardian-app/THENEWSAPI_API_KEY"
-        },
-        {
-          "name": "TAVILY_API_KEY",
-          "valueFrom": "arn:aws:ssm:us-east-2:<ACCOUNT_ID>:parameter/guardian-app/TAVILY_API_KEY"
         },
         {
           "name": "OPENAI_API_KEY",
